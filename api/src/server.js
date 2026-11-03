@@ -19,6 +19,7 @@ const cashFlowRouter = require('./routes/cash-flow');
 const channelsRouter = require('./routes/channels');
 const summariesRouter = require('./routes/summaries');
 const mobileTokensRouter = require('./routes/mobile-tokens');
+const mobileSummaryRouter = require('./routes/mobile-summary');
 const forecastRouter = require('./routes/forecast');
 const { startScheduler } = require('./summary/scheduler');
 const { startForecastScheduler } = require('./forecast/scheduler');
@@ -37,6 +38,11 @@ async function requireAuth(req, res, next) {
   }
   next();
 }
+
+// The companion app's endpoint has its own auth (a revocable device token,
+// never an Actual session), so it is mounted BEFORE the session guard below;
+// the guard is not bypassed for anything else.
+app.use('/api/mobile/summary', mobileSummaryRouter);
 
 app.use('/api', requireAuth);
 
