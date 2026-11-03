@@ -14,7 +14,7 @@ import { maybeRedirectToReports } from '../src/redirect';
 
 test('exports the page hash and tab ids', () => {
   expect(INSIGHTS_PAGE_HASH).toBe('#actual-insights');
-  expect(TAB_IDS).toEqual(['general', 'summaries', 'channels', 'forecast']);
+  expect(TAB_IDS).toEqual(['general', 'summaries', 'channels', 'forecast', 'mobile']);
 });
 
 test('isInsightsPageHash matches the bare page hash and any tab under it', () => {

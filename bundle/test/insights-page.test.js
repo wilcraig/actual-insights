@@ -5,6 +5,7 @@ vi.mock('../src/api-client', () => ({
 import { fetchApi } from '../src/api-client';
 import { mountInsightsPage, findContentRegion } from '../src/insights-page/mount-page';
 import { TABS } from '../src/insights-page/tabs';
+import MobileTab from '../src/insights-page/MobileTab.svelte';
 import GeneralTab from '../src/insights-page/GeneralTab.svelte';
 import SummariesTab from '../src/insights-page/SummariesTab.svelte';
 import ChannelsTab from '../src/insights-page/ChannelsTab.svelte';
@@ -60,13 +61,14 @@ function isShown(el) {
   return el.style.display !== 'none';
 }
 
-test('TABS lists General, Summaries, Channels, Forecast with General as the real tab', () => {
-  expect(TABS.map((t) => t.id)).toEqual(['general', 'summaries', 'channels', 'forecast']);
-  expect(TABS.map((t) => t.label)).toEqual(['General', 'Summaries', 'Channels', 'Forecast']);
+test('TABS lists General, Summaries, Channels, Forecast, Mobile app with General as the real tab', () => {
+  expect(TABS.map((t) => t.id)).toEqual(['general', 'summaries', 'channels', 'forecast', 'mobile']);
+  expect(TABS.map((t) => t.label)).toEqual(['General', 'Summaries', 'Channels', 'Forecast', 'Mobile app']);
   expect(TABS[0].component).toBe(GeneralTab);
   expect(TABS[1].component).toBe(SummariesTab);
   expect(TABS[2].component).toBe(ChannelsTab);
   expect(TABS[3].component).toBe(ForecastTab);
+  expect(TABS[4].component).toBe(MobileTab);
 });
 
 test('findContentRegion finds the tallest sibling after the title bar', () => {

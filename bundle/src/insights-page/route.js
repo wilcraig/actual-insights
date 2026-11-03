@@ -14,7 +14,7 @@
 // serves the bundle, and unknown files under it 404.
 
 export const INSIGHTS_PAGE_HASH = '#actual-insights';
-export const TAB_IDS = ['general', 'summaries', 'channels', 'forecast'];
+export const TAB_IDS = ['general', 'summaries', 'channels', 'forecast', 'mobile'];
 const DEFAULT_TAB = 'general';
 
 /**
