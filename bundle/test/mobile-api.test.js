@@ -3,7 +3,9 @@ vi.mock('../src/api-client', () => ({ fetchApi: vi.fn() }));
 import { fetchApi } from '../src/api-client';
 import { listTokens, createToken, revokeToken, MobileApiError } from '../src/insights-page/mobile-api';
 
-beforeEach(() => fetchApi.mockReset());
+beforeEach(() => {
+  fetchApi.mockReset();
+});
 
 test('listTokens GETs /api/mobile/tokens', async () => {
   const body = { tokens: [{ id: 't1', label: 'Phone', createdAt: '2026-01-01T00:00:00Z', lastUsedAt: null }] };
@@ -45,8 +47,11 @@ test('a non-JSON error body falls back to the status', async () => {
 });
 
 test('an unreachable API maps to a friendly message without leaking the label', async () => {
-  fetchApi.mockRejectedValue(new TypeError('Failed to fetch'));
+  fetchApi.mockImplementation(async () => {
+    throw new TypeError('Failed to fetch');
+  });
   const err = await createToken('Secret label').catch((e) => e);
   expect(err.message).toBe('Could not reach insights-api.');
-  await expect(revokeToken('t1')).rejects.toThrow('Could not reach insights-api.');
+  const err2 = await revokeToken('t1').catch((e) => e);
+  expect(err2.message).toBe('Could not reach insights-api.');
 });
