@@ -290,3 +290,49 @@ describe('service worker kill switch', () => {
     expect(res.headers['cache-control']).toBe('no-store');
   });
 });
+
+describe('the mobile summary endpoint through the proxy', () => {
+  let abt;
+  let api;
+  let proxy;
+  let proxyPort;
+
+  beforeAll(async () => {
+    abt = await startStub('abt');
+    api = await startStub('api');
+    proxy = createApp({ abtOrigin: abt.url, apiOrigin: api.url }).listen(0, '127.0.0.1');
+    await new Promise((resolve) => proxy.once('listening', resolve));
+    proxyPort = proxy.address().port;
+  });
+
+  afterAll(() => {
+    proxy.close();
+    abt.server.close();
+    api.server.close();
+  });
+
+  const request = (headers) =>
+    new Promise((resolve, reject) => {
+      http
+        .get({ host: '127.0.0.1', port: proxyPort, path: '/api/mobile/summary', headers }, (res) => {
+          let body = '';
+          res.on('data', (chunk) => (body += chunk));
+          res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body }));
+        })
+        .on('error', reject);
+    });
+
+  test('goes to insights-api, never to abt, with the Authorization header intact', async () => {
+    const res = await request({ authorization: 'Bearer example-device-token' });
+
+    expect(JSON.parse(res.body)).toEqual({ origin: 'api', url: '/api/mobile/summary' });
+    expect(api.receivedHeaders.at(-1).authorization).toBe('Bearer example-device-token');
+    expect(abt.received).toEqual([]);
+  });
+
+  test('the proxy adds no CORS headers of its own', async () => {
+    const res = await request({ authorization: 'Bearer example-device-token', origin: 'https://other.example.com' });
+
+    expect(Object.keys(res.headers).filter((h) => h.startsWith('access-control-'))).toEqual([]);
+  });
+});
