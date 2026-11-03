@@ -20,8 +20,9 @@ Actual Insights adds a layer of charts and budgeting insights on top of a self-h
   paycheck alerts, and a bills timeline.
 - **An Insights page** in Actual's sidebar: an optional "Fresh" color theme,
   a global text-size control, savings goals, budget summaries, a cash-flow
-  forecast that warns before an account runs low, and notification channels
-  to send them through.
+  forecast that warns before an account runs low, notification channels
+  to send them through, and read-only [Mobile app tokens](#mobile-app-tokens)
+  so a phone or widget can show a budget summary.
 
 All of it is injected into Actual's own Reports page and native UI, with zero
 changes to Actual itself.
@@ -563,6 +564,10 @@ recovered, only replaced.
 - Every failure (missing, malformed, unknown, or revoked token) returns the
   same `401 {"error":"unauthorized"}`, no token is ever written to a log, and
   the endpoint sends no CORS headers: it is for native apps, not web pages.
+- That 401 carries `WWW-Authenticate: Bearer realm="actual-insights"`. A
+  client can use it to tell "this token is bad or revoked" from "this server
+  doesn't have the mobile summary" (an older Actual Insights, or a login
+  page in front of it, answers without the header).
 
 ### Rotating or revoking
 
