@@ -119,7 +119,7 @@
     <div class="action-row">
       <label class="form-row" for="mobile-label">
         <span class="setting-desc">Label</span>
-        <input id="mobile-label" class="abt-input label-input" type="text" maxlength="60" placeholder="e.g. Ryan's phone"
+        <input id="mobile-label" class="abt-input label-input" type="text" maxlength="60" placeholder="e.g. Ann's phone"
           bind:value={label} disabled={atLimit} />
       </label>
       <button type="button" class="abt-btn create-token" disabled={!canCreate} onclick={create}>{busy ? 'Creating…' : 'Create token'}</button>
