@@ -211,7 +211,7 @@ treemap always agree with each other:
 An **Insights** entry in Actual's sidebar, just below Schedules, opens Actual
 Insights' own page. It works with Actual's own sidebar and with Actual Budget
 Tweaks' "Live sidebar", in both its Standard and Split layouts. The page has
-four tabs:
+five tabs:
 
 - **General:** text size, the Fresh theme, and savings goals.
 - **Summaries:** scheduled and on-demand budget summaries (see
@@ -220,6 +220,8 @@ four tabs:
   [Notification channels](#notification-channels)).
 - **Forecast:** a daily check that warns before a watched account's balance
   runs low (see [Cash-flow forecast](#cash-flow-forecast)).
+- **Mobile app:** pair a companion phone app and its home-screen widgets
+  (see [Mobile app tokens](#mobile-app-tokens)).
 
 The page lives in the URL hash (`#actual-insights`, or
 `#actual-insights/summaries`) on whichever Actual page you were on, so a
@@ -520,6 +522,109 @@ The tab talks to `/api/forecast/settings` (GET/PUT), `/api/forecast/check`
 (POST, compute only), `/api/forecast/test` (POST) and
 `/api/forecast/history` (GET).
 
+## Mobile app tokens
+
+A native companion app and its home-screen widgets can show your budget
+status without a web view. They don't sign in to Actual: they use a **device
+token**, a separate, revocable credential that unlocks one read-only
+endpoint and nothing else.
+
+### Pairing a device
+
+1. Open **Insights → Mobile app**, give the device a label ("Ann's phone"),
+   and press **Create token**.
+2. The token appears **once**, with a QR code. In the app, scan the QR code
+   (it encodes `chipmunk://pair?u=<this server's address>&t=<token>`).
+   Press **Done** to remove the token from the screen; it cannot be shown
+   again.
+3. The tab lists every paired device with when it last fetched the summary
+   (**Last used**), and a **Revoke** button.
+
+**The QR code and the token are secrets.** Anyone who has them can read your
+budget summary until you revoke the token, so don't screenshot, share, or
+paste them. The server keeps only a SHA-256 hash of each token (in
+`mobile-tokens.json`, readable only by its owner), so a lost token can't be
+recovered, only replaced.
+
+### What a token can do
+
+- It can call `GET /api/mobile/summary` with `Authorization: Bearer <token>`,
+  and nothing else. Every other `/api` route rejects it with a 401, the same
+  as a request with no credentials, including the routes that manage tokens.
+- It is read-only. The summary reads from the same budget the charts do and
+  never writes to it.
+- Actual's own session token does **not** work on the summary endpoint. The
+  endpoint accepts device tokens only, so revoking a device always cuts off
+  its access.
+- A device can fetch at most 60 times a minute (then `429` with
+  `Retry-After`), and the server computes the summary at most once a minute
+  for everyone, so a widget refreshing often costs the server almost
+  nothing. The numbers can therefore be up to a minute old.
+- Every failure (missing, malformed, unknown, or revoked token) returns the
+  same `401 {"error":"unauthorized"}`, no token is ever written to a log, and
+  the endpoint sends no CORS headers: it is for native apps, not web pages.
+
+### Rotating or revoking
+
+There can be up to 10 paired devices. To **rotate**, create a new token for
+the device, pair it, then revoke the old one. **Revoking takes effect on the
+very next request.** If a phone is lost, revoke its token; nothing else
+needs to change.
+
+### The summary
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" https://budget.example.com/api/mobile/summary
+```
+
+```json
+{
+  "schema": 1,
+  "generatedAt": "2026-11-12T15:04:05.000Z",
+  "currency": "USD",
+  "month": { "label": "2026-11", "budgeted": 480000, "spent": 231500, "remaining": 248500, "daysLeft": 18, "pace": "on" },
+  "projection": { "monthEndNet": 41250 },
+  "accounts": [{ "id": "acct-checking-0001", "name": "Everyday Checking", "balance": 312450, "onBudget": true }],
+  "upcoming": [{ "date": "2026-11-13", "payee": "Example Utilities", "amount": 8400, "kind": "bill" }],
+  "forecast": { "status": "ok", "lowestBalance": 96200, "lowestDate": "2026-11-16", "accountName": "Everyday Checking" },
+  "goals": [{ "id": "goal-trip", "name": "Summer trip", "saved": 80000, "target": 250000 }]
+}
+```
+
+All amounts are integer cents. The payload is under 8 KB, and a section that
+can't be computed is `null` (or `[]`) rather than an error.
+
+- **`month`:** this calendar month's spending categories (income and
+  Transfers groups left out). `remaining` includes carryover, and `pace`
+  compares spending with how much of the month has passed (10% tolerance):
+  `under` is behind pace, `on` is on pace, `over` is ahead of pace or over
+  budget.
+- **`projection.monthEndNet`:** the same projection as
+  `/api/month-end-projection`.
+- **`accounts`:** open on-budget accounts by name, at most 25.
+- **`upcoming`:** scheduled bills and paychecks in the next 7 days, soonest
+  first, at most 10. `amount` is always positive; `kind` says which way the
+  money moves. Transfers in aren't paychecks, and a $0 card payment is
+  left out.
+- **`forecast`:** the headline of the [cash-flow forecast](#cash-flow-forecast):
+  `low` when any watched account drops below its warning level (naming the
+  one furthest below), otherwise `ok` with the lowest balance. `null` when no
+  account is switched on for the forecast.
+- **`goals`:** savings goals, at most 5. `saved` is an account goal's balance
+  or a category goal's carryover balance.
+
+The payload is a public contract, described by
+[`docs/mobile-summary.schema.json`](docs/mobile-summary.schema.json) (JSON
+Schema, draft-07) with a worked
+[`docs/mobile-summary.example.json`](docs/mobile-summary.example.json). After
+release it only changes by **adding** fields, so a client must ignore
+properties it doesn't know. The schema is strict about today's output
+(`additionalProperties: false`) so a test catches any accidental drift.
+
+**Use HTTPS.** A bearer token is sent with every request, so over plain HTTP
+anyone on the network can read it. Put the proxy behind TLS (a reverse proxy
+or a tunnel) before pairing a phone that leaves your home network.
+
 ## Savings goals
 
 The two goal-based charts (the thermometers and the balance-history goal
@@ -595,7 +700,9 @@ browser --(HTTPS)--> insights-proxy --> abt/actual (Actual's own server)
   client connection. It's read-only, except for savings goals. Every request
   is validated against Actual's own session token, the same mechanism
   Actual's web client uses, so there's no separate login or credential to
-  manage.
+  manage. The one exception is `GET /api/mobile/summary`, which a paired
+  phone calls with a revocable device token instead (see
+  [Mobile app tokens](#mobile-app-tokens)).
 - **`bundle/`**: the browser-side code. That's the Svelte 5 + D3 widgets, the
   widget registry and builder panel, the Insights page and its sidebar
   entry, the Settings-page card, and the mount logic that scans the page for
@@ -621,7 +728,7 @@ browser --(HTTPS)--> insights-proxy --> abt/actual (Actual's own server)
 | `ACTUAL_SERVER_PASSWORD` | Actual's server password |
 | `ACTUAL_SYNC_ID` | The budget's sync *group* id (Settings → Advanced Settings → Sync ID in Actual) |
 | `ACTUAL_E2E_PASSWORD` | Only needed if the budget has end-to-end encryption enabled |
-| `INSIGHTS_DATA_DIR` | Where `goals.json`, `channels.json`, `summary-settings.json`, `summary-history.json`, `forecast-settings.json` and `forecast-history.json` are stored (default `/data`). Mount a writable volume here so they survive container rebuilds; `channels.json` holds secrets, so keep the volume private |
+| `INSIGHTS_DATA_DIR` | Where `goals.json`, `channels.json`, `summary-settings.json`, `summary-history.json`, `forecast-settings.json`, `forecast-history.json` and `mobile-tokens.json` are stored (default `/data`). Mount a writable volume here so they survive container rebuilds; `channels.json` holds secrets and `mobile-tokens.json` holds token hashes, so keep the volume private |
 | `PORT` | `3011` by default |
 | `TZ` | Set this to your own timezone (required): several widgets do day-of-month math, and budget summary schedules and the daily cash-flow check fire in this zone |
 
