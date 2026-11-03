@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "generatedAt": "2026-11-12T15:04:05.000Z",
+  "currency": "USD",
+  "month": {
+    "label": "2026-11",
+    "budgeted": 480000,
+    "spent": 231500,
+    "remaining": 248500,
+    "daysLeft": 18,
+    "pace": "on"
+  },
+  "projection": { "monthEndNet": 41250 },
+  "accounts": [
+    { "id": "acct-checking-0001", "name": "Everyday Checking", "balance": 312450, "onBudget": true },
+    { "id": "acct-savings-0002", "name": "Rainy Day Savings", "balance": 1050000, "onBudget": true }
+  ],
+  "upcoming": [
+    { "date": "2026-11-13", "payee": "Example Utilities", "amount": 8400, "kind": "bill" },
+    { "date": "2026-11-14", "payee": "Example Employer", "amount": 215000, "kind": "paycheck" },
+    { "date": "2026-11-17", "payee": "Example Card", "amount": 54000, "kind": "bill" }
+  ],
+  "forecast": { "status": "ok", "lowestBalance": 96200, "lowestDate": "2026-11-16", "accountName": "Everyday Checking" },
+  "goals": [
+    { "id": "goal-trip", "name": "Summer trip", "saved": 80000, "target": 250000 }
+  ]
+}

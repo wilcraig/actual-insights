@@ -1,0 +1,117 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://budget.example.com/schemas/mobile-summary.schema.json",
+  "title": "Actual Insights mobile summary",
+  "description": "Response of GET /api/mobile/summary, schema version 1. Amounts are integer minor units (cents). After release this schema changes additively only: new optional fields may appear, so clients must ignore properties they do not know. This file describes exactly what the server sends today, which is why additionalProperties is false.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "generatedAt", "currency", "month", "projection", "accounts", "upcoming", "forecast", "goals"],
+  "properties": {
+    "schema": { "const": 1, "description": "Payload schema version." },
+    "generatedAt": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$",
+      "description": "When the server computed this payload (UTC). The server may reuse a payload for up to 60 seconds."
+    },
+    "currency": { "type": "string", "pattern": "^[A-Z]{3}$", "description": "ISO 4217 code of the budget's default currency; USD when the budget does not say." },
+    "month": {
+      "description": "The current calendar month's budget. Null when it could not be read.",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["label", "budgeted", "spent", "remaining", "daysLeft", "pace"],
+          "properties": {
+            "label": { "type": "string", "pattern": "^\\d{4}-\\d{2}$", "description": "YYYY-MM. Localize it in the app." },
+            "budgeted": { "type": "integer", "description": "Sum of this month's budgeted amounts over spending categories (income and transfer groups excluded)." },
+            "spent": { "type": "integer", "description": "Positive spending so far, net of refunds, over the same categories." },
+            "remaining": { "type": "integer", "description": "Money left to spend, carryover included. Negative when over budget." },
+            "daysLeft": { "type": "integer", "minimum": 0, "maximum": 31, "description": "Days after today in the month; 0 on the last day." },
+            "pace": {
+              "enum": ["under", "on", "over"],
+              "description": "Spending against the share of the month gone, with a 10% tolerance: under = behind pace, on = on pace, over = ahead of pace or over budget."
+            }
+          }
+        }
+      ]
+    },
+    "projection": {
+      "description": "Projected end-of-month net. Null when it could not be computed.",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["monthEndNet"],
+          "properties": { "monthEndNet": { "type": "integer", "description": "Income minus spending projected to month end. Negative means a projected shortfall." } }
+        }
+      ]
+    },
+    "accounts": {
+      "type": "array",
+      "maxItems": 25,
+      "description": "Open on-budget accounts by name, at most 25.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "balance", "onBudget"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "name": { "type": "string", "maxLength": 64 },
+          "balance": { "type": ["integer", "null"], "description": "Null when the balance could not be read." },
+          "onBudget": { "type": "boolean" }
+        }
+      }
+    },
+    "upcoming": {
+      "type": "array",
+      "maxItems": 10,
+      "description": "Scheduled bills and paychecks in the next 7 days, soonest first, at most 10. Transfers between your own accounts that are not payments are left out.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["date", "payee", "amount", "kind"],
+        "properties": {
+          "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "payee": { "type": "string", "maxLength": 64 },
+          "amount": { "type": "integer", "minimum": 1, "description": "Always positive; kind says which direction the money moves." },
+          "kind": { "enum": ["bill", "paycheck"] }
+        }
+      }
+    },
+    "forecast": {
+      "description": "Cash-flow forecast headline. Null when no account is switched on for the forecast, or it could not be computed.",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "lowestBalance", "lowestDate", "accountName"],
+          "properties": {
+            "status": { "enum": ["ok", "low"], "description": "low when any watched account drops below its warning level in the window." },
+            "lowestBalance": { "type": "integer", "description": "The lowest projected balance of the account named in accountName (the one furthest below its level when status is low)." },
+            "lowestDate": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+            "accountName": { "type": "string", "maxLength": 64 }
+          }
+        }
+      ]
+    },
+    "goals": {
+      "type": "array",
+      "maxItems": 5,
+      "description": "Savings goals in the order they were created, at most 5.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "saved", "target"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "name": { "type": "string", "maxLength": 64 },
+          "saved": { "type": "integer" },
+          "target": { "type": "integer", "minimum": 1 }
+        }
+      }
+    }
+  }
+}
