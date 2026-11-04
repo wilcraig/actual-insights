@@ -21,7 +21,7 @@ import SettingsLinkCard from './settings-panel/SettingsLinkCard.svelte';
 import { mountInsightsPage } from './insights-page/mount-page';
 import { mountSidebarEntry } from './insights-page/sidebar-entry';
 import { PRESETS, loadSavedScale, applyScale } from './text-scale';
-import { loadSavedFreshThemeEnabled, applyFreshTheme } from './fresh-theme';
+import { loadSavedFreshThemeEnabled, applyFreshTheme, watchActualTheme } from './fresh-theme';
 import { fixBudgetIconCrop } from './budget-icon-fix';
 
 // Pure CSS, no DOM dependency beyond `document.head` -- safe to run
@@ -45,6 +45,14 @@ try {
 } catch {
   applyFreshTheme(document, false);
 }
+// Actual sets (and later swaps) its light/dark theme after this script runs.
+watchActualTheme(document, () => {
+  try {
+    return loadSavedFreshThemeEnabled(window.localStorage);
+  } catch {
+    return false;
+  }
+});
 
 try {
   maybeRedirectToReports(window.location, window.sessionStorage);

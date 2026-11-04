@@ -2,6 +2,8 @@ import {
   FRESH_PALETTE,
   FRESH_COLOR_OVERRIDES,
   applyFreshTheme,
+  actualThemeIsLight,
+  watchActualTheme,
   loadSavedFreshThemeEnabled,
   saveFreshThemeEnabled,
 } from '../src/fresh-theme';
@@ -68,4 +70,52 @@ test('saveFreshThemeEnabled persists the choice for loadSavedFreshThemeEnabled t
   expect(loadSavedFreshThemeEnabled(storage)).toBe(true);
   saveFreshThemeEnabled(storage, false);
   expect(loadSavedFreshThemeEnabled(storage)).toBe(false);
+});
+
+describe('only applies while Actual is on a light theme', () => {
+  function setActualBackground(value) {
+    document.documentElement.style.setProperty('--color-pageBackground', value);
+  }
+  afterEach(() => document.documentElement.style.removeProperty('--color-pageBackground'));
+
+  test('does not apply when Actual reports a dark page background', () => {
+    setActualBackground('#0c0d14');
+    applyFreshTheme(document, true);
+    expect(document.getElementById('insights-fresh-theme')).toBeNull();
+  });
+
+  test('applies when Actual reports a light page background', () => {
+    setActualBackground('rgb(242, 244, 247)');
+    applyFreshTheme(document, true);
+    expect(document.getElementById('insights-fresh-theme')).not.toBeNull();
+  });
+
+  test('removes an applied theme when Actual switches to dark, and restores it on light', async () => {
+    setActualBackground('#f2f4f7');
+    const stop = watchActualTheme(document, () => true);
+    applyFreshTheme(document, true);
+    expect(document.getElementById('insights-fresh-theme')).not.toBeNull();
+
+    setActualBackground('#0c0d14');
+    const actualStyle = document.createElement('style');
+    document.head.appendChild(actualStyle);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(document.getElementById('insights-fresh-theme')).toBeNull();
+
+    setActualBackground('#f2f4f7');
+    actualStyle.textContent = '/* theme swap */';
+    await new Promise((r) => setTimeout(r, 0));
+    expect(document.getElementById('insights-fresh-theme')).not.toBeNull();
+    stop();
+  });
+
+  test('actualThemeIsLight reads Actual, not our own override, and leaves our element enabled', () => {
+    setActualBackground('#0c0d14');
+    const el = document.createElement('style');
+    el.id = 'insights-fresh-theme';
+    el.textContent = ':root { --color-pageBackground: #ffffff !important; }';
+    document.head.appendChild(el);
+    expect(actualThemeIsLight(document)).toBe(false);
+    expect(el.media).toBe('');
+  });
 });

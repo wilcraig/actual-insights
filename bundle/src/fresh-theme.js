@@ -86,9 +86,63 @@ function buildCss() {
   return `:root { ${decls} }`;
 }
 
+// The palette above is built against Actual's light theme: it recolors the
+// navy ramp as light cream surfaces and forces a light sidebar. Actual's dark
+// themes use that same ramp for dark surfaces, so applying it there gives a
+// dark-green page next to a light sidebar with unreadable text. The theme is
+// therefore only applied while Actual itself is light.
+function relativeLuminance(color) {
+  let m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(color);
+  let rgb;
+  if (m) {
+    const h = m[1].length === 3 ? [...m[1]].map((c) => c + c).join('') : m[1];
+    rgb = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+  } else {
+    m = /^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/i.exec(color);
+    if (!m) return null;
+    rgb = [m[1], m[2], m[3]].map(Number);
+  }
+  const [r, g, b] = rgb.map((v) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+// Reads Actual's own page background with this theme switched off, so the
+// answer is about Actual and not about our override. Unknown counts as light
+// (the theme's original behavior), e.g. before Actual has set its theme.
+export function actualThemeIsLight(doc) {
+  const styleEl = doc.getElementById(STYLE_ELEMENT_ID);
+  const prevMedia = styleEl ? styleEl.media : '';
+  if (styleEl) styleEl.media = 'not all';
+  let value = '';
+  try {
+    value = doc.defaultView?.getComputedStyle(doc.documentElement).getPropertyValue('--color-pageBackground').trim() ?? '';
+  } finally {
+    if (styleEl) styleEl.media = prevMedia;
+  }
+  const lum = relativeLuminance(value);
+  return lum === null || lum > 0.5;
+}
+
+// Actual swaps themes by rewriting its own <style>, so the light/dark answer
+// changes after load. Re-applies on any head change except our own element's.
+export function watchActualTheme(doc, isEnabled) {
+  const Observer = doc.defaultView?.MutationObserver;
+  if (!Observer) return () => {};
+  const observer = new Observer((mutations) => {
+    const ours = doc.getElementById(STYLE_ELEMENT_ID);
+    if (ours && mutations.every((m) => ours.contains(m.target))) return;
+    applyFreshTheme(doc, isEnabled());
+  });
+  observer.observe(doc.head, { childList: true, subtree: true, characterData: true });
+  return () => observer.disconnect();
+}
+
 export function applyFreshTheme(doc, enabled) {
   let styleEl = doc.getElementById(STYLE_ELEMENT_ID);
-  if (enabled) {
+  if (enabled && actualThemeIsLight(doc)) {
     if (!styleEl) {
       styleEl = doc.createElement('style');
       styleEl.id = STYLE_ELEMENT_ID;
