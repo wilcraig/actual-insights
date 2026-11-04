@@ -1,0 +1,7 @@
+**/node_modules
+bundle/dist
+.git
+.gstack
+.superpowers
+docs/screenshots
+**/.DS_Store

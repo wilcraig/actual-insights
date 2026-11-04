@@ -1,0 +1,22 @@
+# One container: Actual Budget + (optionally) Actual Budget Tweaks + Actual Insights.
+# Build the image first, from the repository root:
+#   docker build -f all-in-one/Dockerfile -t actual-insights-aio .
+services:
+  actual:
+    image: actual-insights-aio
+    restart: unless-stopped
+    ports:
+      - "5006:5006" # the only port; put your HTTPS reverse proxy (or Tailscale) in front of it
+    volumes:
+      - ./data:/data # Actual's files and everything Insights stores (/data/insights)
+    environment:
+      - TZ=America/Denver
+      # Step 2, after you have created your budget in Actual: let Insights read it.
+      # Same password you sign in to Actual with, and the budget's Sync ID
+      # (Actual: Settings, Show advanced settings, Sync ID).
+      # - ACTUAL_SERVER_PASSWORD=
+      # - ACTUAL_SYNC_ID=
+      # - ACTUAL_E2E_PASSWORD=   # only if the budget uses end-to-end encryption
+      # Optional layers (both on by default):
+      # - ABT_ENABLED=false      # Actual Budget Tweaks
+      # - INSIGHTS_ENABLED=false # Actual Insights

@@ -685,6 +685,10 @@ tab (see [The Insights page](#the-insights-page)):
 | --- |
 | ![Transaction register at the Large text-size preset](docs/screenshots/text-scale-large.jpg) |
 
+## One-container image
+
+`all-in-one/` builds a single image that runs Actual Budget, Actual Budget Tweaks and Actual Insights together behind one port, for hosts that run one container (and for a one-command self-hosted install). Each layer can be switched off. See [all-in-one/README.md](all-in-one/README.md).
+
 ## Architecture
 
 ```
