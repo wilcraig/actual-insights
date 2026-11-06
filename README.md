@@ -606,7 +606,7 @@ can't be computed is `null` (or `[]`) rather than an error.
   budget.
 - **`projection.monthEndNet`:** the same projection as
   `/api/month-end-projection`.
-- **`accounts`:** open on-budget accounts by name, at most 25.
+- **`accounts`:** open accounts, on-budget first, then off-budget ones with `onBudget: false`, each by name, at most 25.
 - **`upcoming`:** scheduled bills and paychecks in the next 7 days, soonest
   first, at most 10. `amount` is always positive; `kind` says which way the
   money moves. Transfers in aren't paychecks, and a $0 card payment is

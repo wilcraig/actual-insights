@@ -51,7 +51,7 @@
     "accounts": {
       "type": "array",
       "maxItems": 25,
-      "description": "Open on-budget accounts by name, at most 25.",
+      "description": "Open accounts, on-budget first then off-budget (onBudget false), each by name, at most 25.",
       "items": {
         "type": "object",
         "additionalProperties": false,

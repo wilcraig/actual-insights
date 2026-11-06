@@ -169,12 +169,24 @@ describe('projection', () => {
 });
 
 describe('accounts', () => {
-  test('lists open on-budget accounts by name with their balances', async () => {
+  test('lists open accounts, on-budget first then off-budget, each by name, with the real onBudget flag', async () => {
     const { accounts } = await build();
     expect(accounts).toEqual([
       { id: 'a-chk', name: 'Everyday Checking', balance: 312450, onBudget: true },
       { id: 'a-sav', name: 'Rainy Day Savings', balance: 1050000, onBudget: true },
+      { id: 'a-401k', name: 'Retirement', balance: 9900000, onBudget: false },
     ]);
+  });
+
+  test('the cap keeps on-budget accounts ahead of off-budget ones', async () => {
+    const mixed = [
+      ...Array.from({ length: 20 }, (_, i) => ({ id: `off-${i}`, name: `A off ${i}`, offbudget: true, closed: false })),
+      ...Array.from({ length: 10 }, (_, i) => ({ id: `on-${i}`, name: `Z on ${i}`, offbudget: false, closed: false })),
+    ];
+    const { accounts } = await build(makeClient({ getAccounts: jest.fn(async () => mixed) }));
+    expect(accounts).toHaveLength(25);
+    expect(accounts.filter((a) => a.onBudget)).toHaveLength(10);
+    expect(accounts.slice(0, 10).every((a) => a.onBudget)).toBe(true);
   });
 
   test('no accounts is an empty list', async () => {
@@ -267,7 +279,7 @@ describe('forecast', () => {
     computeForecast.mockRejectedValue(new Error('boom'));
     const payload = await build();
     expect(payload.forecast).toBeNull();
-    expect(payload.accounts).toHaveLength(2);
+    expect(payload.accounts).toHaveLength(3);
   });
 
   test('null when every watched account failed', async () => {
@@ -334,7 +346,7 @@ describe('resilience and shape', () => {
     expect(payload.projection).toBeNull();
     expect(payload.upcoming).toEqual([]);
     expect(payload.goals).toEqual([]);
-    expect(payload.accounts).toHaveLength(2);
+    expect(payload.accounts).toHaveLength(3);
     expectValid(payload);
   });
 
