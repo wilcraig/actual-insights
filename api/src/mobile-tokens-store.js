@@ -3,7 +3,10 @@ const fs = require('fs/promises');
 const path = require('path');
 
 // Device tokens for the companion mobile app: scoped, revocable credentials
-// that unlock exactly one read-only endpoint (/api/mobile/summary). The plain
+// that unlock the mobile endpoints (/api/mobile/summary and /api/mobile/v1/*).
+// A token's scope is 'read' (the default, and what every record created before
+// scopes existed is) or 'write' (may also change categories and budget
+// amounts through v1). The plain
 // token is 32 random bytes as base64url and is handed out once, at creation;
 // only its SHA-256 hash is stored, with a label and two timestamps. Same data
 // dir and temp-file-then-rename persistence as goals-store.js.
@@ -12,6 +15,7 @@ const DATA_DIR = process.env.INSIGHTS_DATA_DIR || process.env.ACTUALMINT_DATA_DI
 const FILE_NAME = 'mobile-tokens.json';
 const MAX_TOKENS = 10;
 const MAX_LABEL_LENGTH = 60;
+const SCOPES = ['read', 'write'];
 // lastUsedAt is bookkeeping for the person reading the token list, not a
 // security log, so a busy widget refreshing every few seconds must not turn
 // into a disk write per request.
@@ -61,16 +65,25 @@ function update(dataDir, mutate) {
   return run;
 }
 
-// The public shape of a token: never the hash.
-const publicRecord = ({ id, label, createdAt, lastUsedAt }) => ({ id, label, createdAt, lastUsedAt });
+// The public shape of a token: never the hash. A record without a scope (made
+// before scopes existed) is read-only; anything unrecognised fails closed to it.
+const publicRecord = ({ id, label, scope, createdAt, lastUsedAt }) => ({
+  id,
+  label,
+  scope: scope === 'write' ? 'write' : 'read',
+  createdAt,
+  lastUsedAt,
+});
 
 async function listTokens(dataDir = DATA_DIR) {
   return (await readFile(dataDir)).map(publicRecord);
 }
 
-// -> { ok: true, id, token, label, createdAt } | { ok: false, error, status }.
-// `token` is the only copy of the secret there will ever be.
-async function createToken(label, dataDir = DATA_DIR) {
+// -> { ok: true, id, token, label, scope, createdAt } | { ok: false, error, status }.
+// `token` is the only copy of the secret there will ever be. `scope` defaults
+// to 'read'; anything but 'read' or 'write' is refused.
+async function createToken(label, dataDir = DATA_DIR, { scope = 'read' } = {}) {
+  if (!SCOPES.includes(scope)) return { ok: false, error: "scope must be 'read' or 'write'", status: 400 };
   const trimmed = typeof label === 'string' ? label.trim() : '';
   if (trimmed.length === 0) return { ok: false, error: 'label is required', status: 400 };
   if (trimmed.length > MAX_LABEL_LENGTH) {
@@ -85,13 +98,14 @@ async function createToken(label, dataDir = DATA_DIR) {
     const record = {
       id: crypto.randomUUID(),
       label: trimmed,
+      scope,
       hash: sha256(token).toString('hex'),
       createdAt: new Date().toISOString(),
       lastUsedAt: null,
     };
     return {
       write: [...tokens, record],
-      value: { ok: true, id: record.id, token, label: record.label, createdAt: record.createdAt },
+      value: { ok: true, id: record.id, token, label: record.label, scope, createdAt: record.createdAt },
     };
   });
 }
@@ -143,4 +157,4 @@ function touchToken(id, now = new Date(), dataDir = DATA_DIR) {
   });
 }
 
-module.exports = { listTokens, createToken, revokeToken, verifyToken, touchToken, MAX_TOKENS, DATA_DIR };
+module.exports = { listTokens, createToken, revokeToken, verifyToken, touchToken, MAX_TOKENS, SCOPES, DATA_DIR };

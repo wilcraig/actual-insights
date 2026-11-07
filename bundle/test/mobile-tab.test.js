@@ -10,7 +10,7 @@ import MobileTab from '../src/insights-page/MobileTab.svelte';
 
 const SECRET = 'tok_SuperSecretValue_123';
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
-const tok = (id, label, lastUsedAt = null) => ({ id, label, createdAt: '2026-10-01T12:00:00.000Z', lastUsedAt });
+const tok = (id, label, lastUsedAt = null, scope = 'read') => ({ id, label, scope, createdAt: '2026-10-01T12:00:00.000Z', lastUsedAt });
 
 let app;
 async function mountTab() {
@@ -79,7 +79,7 @@ test('creating shows the token once with the QR code and pairing URL, then lists
   const host = await mountTab();
   listTokens.mockResolvedValue({ tokens: [tok('t9', 'My phone')] });
   await create(host);
-  expect(createToken).toHaveBeenCalledWith('My phone');
+  expect(createToken).toHaveBeenCalledWith('My phone', 'read');
   const block = host.querySelector('.new-token');
   expect(block).not.toBeNull();
   expect(block.textContent).toContain(SECRET);
@@ -185,4 +185,34 @@ test('a failed list load shows an error', async () => {
   listTokens.mockRejectedValue(new MobileApiError('Could not reach insights-api.'));
   const host = await mountTab();
   expect(host.querySelector('.mobile-error').textContent).toContain('Could not reach insights-api.');
+});
+
+test('the edit checkbox is off by default, explains itself, and creates a read token', async () => {
+  const host = await mountTab();
+  const box = host.querySelector('.allow-edit');
+  expect(box.checked).toBe(false);
+  expect(host.textContent).toContain('Allow this device to change my budget');
+  expect(host.querySelector('.allow-edit-note').textContent).toMatch(/categorize transactions and edit budget amounts.*revoking the device removes it/);
+  await create(host);
+  expect(createToken).toHaveBeenLastCalledWith('My phone', 'read');
+});
+
+test('ticking the checkbox creates a write token, then the box resets', async () => {
+  const host = await mountTab();
+  const box = host.querySelector('.allow-edit');
+  box.click();
+  await flush();
+  expect(box.checked).toBe(true);
+  await create(host);
+  expect(createToken).toHaveBeenLastCalledWith('My phone', 'write');
+  expect(host.querySelector('.allow-edit').checked).toBe(false);
+});
+
+test('each device shows its access: Read only or Can edit', async () => {
+  listTokens.mockResolvedValue({ tokens: [tok('t1', 'Ann phone'), tok('t2', 'Ryan phone', null, 'write'), { id: 't3', label: 'Old', createdAt: '2026-10-01T12:00:00.000Z', lastUsedAt: null }] });
+  const host = await mountTab();
+  const rows = [...host.querySelectorAll('.token-row')].map((r) => r.textContent);
+  expect(rows[0]).toContain('Read only');
+  expect(rows[1]).toContain('Can edit');
+  expect(rows[2]).toContain('Read only');
 });

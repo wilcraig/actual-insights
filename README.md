@@ -527,8 +527,10 @@ The tab talks to `/api/forecast/settings` (GET/PUT), `/api/forecast/check`
 
 A native companion app and its home-screen widgets can show your budget
 status without a web view. They don't sign in to Actual: they use a **device
-token**, a separate, revocable credential that unlocks one read-only
-endpoint and nothing else.
+token**, a separate, revocable credential that unlocks the companion
+endpoints (`/api/mobile/summary` and `/api/mobile/v1/*`) and nothing else. A
+token is **read-only** unless you tick **Allow this device to change my
+budget** when creating it.
 
 ### Pairing a device
 
@@ -549,11 +551,26 @@ recovered, only replaced.
 
 ### What a token can do
 
-- It can call `GET /api/mobile/summary` with `Authorization: Bearer <token>`,
-  and nothing else. Every other `/api` route rejects it with a 401, the same
-  as a request with no credentials, including the routes that manage tokens.
-- It is read-only. The summary reads from the same budget the charts do and
-  never writes to it.
+- It can call `GET /api/mobile/summary` and the native client API under
+  `/api/mobile/v1` with `Authorization: Bearer <token>`, and nothing else.
+  Every other `/api` route rejects it with a 401, the same as a request with
+  no credentials, including the routes that manage tokens.
+- **Scope.** A `read` token (the default, and every token created before
+  scopes existed) can only read. A `write` token can also categorize
+  transactions (`PATCH /api/mobile/v1/transactions/<id>`, or a `POST` with
+  `X-HTTP-Method-Override: PATCH`) and edit budget amounts
+  (`PUT /api/mobile/v1/budget/<month>/categories/<id>`,
+  `POST /api/mobile/v1/budget/<month>/move`). A read token trying a write gets
+  `403 {"error":"read_only"}` and nothing changes. `POST /api/mobile/tokens`
+  takes an optional `"scope": "read" | "write"`; the list shows each device's
+  scope, and revoking a device cuts reads and writes at once. The summary works
+  with either scope.
+- **Writes are audited.** Every successful write appends one JSON line (time,
+  token id, operation, ids, before and after values, never the token) to
+  `mobile-audit.log` in the data directory, so a change from a phone can always
+  be traced and undone. Writes run one at a time and sync to the Actual server
+  immediately. Limits: 60 reads a minute per token (shared with the summary)
+  and 20 writes a minute.
 - Actual's own session token does **not** work on the summary endpoint. The
   endpoint accepts device tokens only, so revoking a device always cuts off
   its access.
@@ -733,7 +750,7 @@ browser --(HTTPS)--> insights-proxy --> abt/actual (Actual's own server)
 | `ACTUAL_SERVER_PASSWORD` | Actual's server password |
 | `ACTUAL_SYNC_ID` | The budget's sync *group* id (Settings → Advanced Settings → Sync ID in Actual) |
 | `ACTUAL_E2E_PASSWORD` | Only needed if the budget has end-to-end encryption enabled |
-| `INSIGHTS_DATA_DIR` | Where `goals.json`, `channels.json`, `summary-settings.json`, `summary-history.json`, `forecast-settings.json`, `forecast-history.json` and `mobile-tokens.json` are stored (default `/data`). Mount a writable volume here so they survive container rebuilds; `channels.json` holds secrets and `mobile-tokens.json` holds token hashes, so keep the volume private |
+| `INSIGHTS_DATA_DIR` | Where `goals.json`, `channels.json`, `summary-settings.json`, `summary-history.json`, `forecast-settings.json`, `forecast-history.json`, `mobile-tokens.json` and `mobile-audit.log` are stored (default `/data`). Mount a writable volume here so they survive container rebuilds; `channels.json` holds secrets and `mobile-tokens.json` holds token hashes, so keep the volume private |
 | `PORT` | `3011` by default |
 | `TZ` | Set this to your own timezone (required): several widgets do day-of-month math, and budget summary schedules and the daily cash-flow check fire in this zone |
 

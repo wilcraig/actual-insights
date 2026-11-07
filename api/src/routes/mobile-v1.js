@@ -1,0 +1,236 @@
+const express = require('express');
+
+const { getActualClient, syncIfDue } = require('../actual-client');
+const { touchToken } = require('../mobile-tokens-store');
+const { bearerAuth, rateLimit, resetRateLimits, READ_LIMIT, WRITE_LIMIT } = require('../mobile/http');
+const { createReadCache } = require('../mobile/v1/cache');
+const { MONTH_PATTERN, ID_PATTERN, HttpError, badRequest, isValidId, monthWithinWindow } = require('../mobile/v1/common');
+const { MAX_LIMIT, DEFAULT_LIMIT, CURSOR_PATTERN, buildCurrency, buildAccounts, buildTransactions, buildCategories, buildBudgetMonth } = require('../mobile/v1/read');
+const { categorizeTransaction, setBudgetedAmount, moveBudget } = require('../mobile/v1/write');
+
+// /api/mobile/v1: the native client API (contract: native-v1.schema.json in
+// the Chipmunk repo, copied under api/test/fixtures). Mounted BEFORE the
+// global Actual-session guard in server.js, like /api/mobile/summary, with the
+// same device-token auth. A token has a scope: 'read' reaches the GETs,
+// 'write' may also change categories and budget amounts. Errors are always
+// `{ error: code }`; a body, query or path value is never echoed back.
+
+const router = express.Router();
+const cache = createReadCache();
+
+const readLimit = rateLimit('read', READ_LIMIT, 'rate_limited');
+const writeLimit = rateLimit('write', WRITE_LIMIT, 'rate_limited');
+
+// Nothing here is ever cacheable by anything on the way, and no CORS headers
+// are ever set (a browser page can't call this, only a native app).
+router.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
+router.use(bearerAuth);
+// Bodies are parsed per write route, after auth, rate limit and the scope
+// check, so an unauthenticated caller always gets the 401 and a read token
+// always gets the 403, whatever it sends.
+const parseJson = express.json({ limit: '2kb' });
+
+function fail(res, err) {
+  if (err instanceof HttpError) {
+    res.status(err.status).json({ error: err.code });
+    return;
+  }
+  // Never echo internals, and never log the request: it carries a token.
+  console.error('mobile v1 failed:', err && err.code ? err.code : 'unexpected error');
+  res.status(500).json({ error: 'internal' });
+}
+
+// Only these query parameters, each a single plain string.
+function strictQuery(req, allowed) {
+  for (const [key, value] of Object.entries(req.query)) {
+    if (!allowed.includes(key) || typeof value !== 'string' || value === '') throw badRequest();
+  }
+}
+
+function pathMonth(req) {
+  const { month } = req.params;
+  if (!MONTH_PATTERN.test(month) || !monthWithinWindow(month)) throw badRequest();
+  return month;
+}
+
+function pathId(value) {
+  if (!ID_PATTERN.test(value)) throw badRequest();
+  return value;
+}
+
+// A body that is exactly a JSON object with exactly these keys.
+function strictBody(req, keys) {
+  const body = req.body;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw badRequest();
+  const present = Object.keys(body);
+  if (present.length !== keys.length || !keys.every((k) => present.includes(k))) throw badRequest();
+  return body;
+}
+
+const isCents = (v, min, max) => typeof v === 'number' && Number.isSafeInteger(v) && v >= min && v <= max;
+
+// A read endpoint: validate, then answer from the cache or build once (with an
+// Actual sync first, throttled like the other routes).
+function read(handler) {
+  return async (req, res) => {
+    try {
+      const { key, build, respond } = handler(req);
+      const payload = await cache.get(key, async () => {
+        const client = await getActualClient();
+        await syncIfDue(client);
+        return build(client);
+      });
+      touchToken(req.deviceToken.id).catch(() => {});
+      res.status(200).json(respond ? respond(payload) : payload);
+    } catch (err) {
+      fail(res, err);
+    }
+  };
+}
+
+router.get('/me', readLimit, read((req) => {
+  strictQuery(req, []);
+  return {
+    key: 'me',
+    build: buildCurrency,
+    // The scope is this token's own, so it is never part of what is cached.
+    respond: ({ currency }) => ({ schema: 1, scope: req.deviceToken.scope, currency }),
+  };
+}));
+
+router.get('/accounts', readLimit, read((req) => {
+  strictQuery(req, []);
+  return { key: 'accounts', build: (client) => buildAccounts(client) };
+}));
+
+router.get('/transactions', readLimit, read((req) => {
+  strictQuery(req, ['account', 'uncategorized', 'limit', 'cursor']);
+  const { account, uncategorized, limit, cursor } = req.query;
+  if (account !== undefined && !isValidId(account)) throw badRequest();
+  if (uncategorized !== undefined && uncategorized !== '1') throw badRequest();
+  if (limit !== undefined && !/^[1-9][0-9]{0,2}$/.test(limit)) throw badRequest();
+  if (limit !== undefined && Number(limit) > MAX_LIMIT) throw badRequest();
+  if (cursor !== undefined && (cursor.length > 256 || !CURSOR_PATTERN.test(cursor))) throw badRequest();
+  const params = {
+    account,
+    uncategorized: uncategorized === '1',
+    limit: limit === undefined ? DEFAULT_LIMIT : Number(limit),
+    cursor,
+  };
+  const key = `transactions|${params.account ?? ''}|${params.uncategorized ? 1 : 0}|${params.limit}|${params.cursor ?? ''}`;
+  return { key, build: (client) => buildTransactions(client, params) };
+}));
+
+router.get('/categories', readLimit, read((req) => {
+  strictQuery(req, []);
+  return { key: 'categories', build: (client) => buildCategories(client) };
+}));
+
+router.get('/budget/:month', readLimit, read((req) => {
+  strictQuery(req, []);
+  const month = pathMonth(req);
+  return { key: `budget|${month}`, build: (client) => buildBudgetMonth(client, month) };
+}));
+
+router.get('/reports', readLimit, read((req) => {
+  strictQuery(req, []);
+  return {
+    key: 'reports',
+    build: async (client) => {
+      // Loaded lazily so a problem in the reports code can only ever break this endpoint.
+      const { buildReports } = require('../mobile/v1/reports');
+      return buildReports({ client, now: new Date() });
+    },
+  };
+}));
+
+// Writes: rate limited on their own, then scope-checked (a read token changes
+// nothing), then validated. A success clears the whole read cache.
+function requireWrite(req, res, next) {
+  if (req.deviceToken.scope !== 'write') {
+    res.status(403).json({ error: 'read_only' });
+    return;
+  }
+  next();
+}
+
+function write(handler) {
+  return async (req, res) => {
+    try {
+      const run = handler(req);
+      const body = await run();
+      cache.clear();
+      touchToken(req.deviceToken.id).catch(() => {});
+      res.status(200).json(body);
+    } catch (err) {
+      // A write that threw may still have changed something (for example a
+      // failure after the data was saved), so the cache goes either way.
+      if (!(err instanceof HttpError)) cache.clear();
+      fail(res, err);
+    }
+  };
+}
+
+const categorize = write((req) => {
+  const transactionId = pathId(req.params.id);
+  const { category } = strictBody(req, ['category']);
+  if (category !== null && !isValidId(category)) throw badRequest();
+  return () => categorizeTransaction({ tokenId: req.deviceToken.id, transactionId, categoryId: category });
+});
+
+router.patch('/transactions/:id', writeLimit, requireWrite, parseJson, categorize);
+
+// Some HTTP stacks (Android's HttpURLConnection) can't send PATCH. They send a
+// POST carrying `X-HTTP-Method-Override: PATCH`, which is treated exactly like
+// the PATCH (same auth, scope, rate limit, validation and response). A POST
+// without that header, or with any other value, is a 400.
+router.post('/transactions/:id', writeLimit, requireWrite, (req, res, next) => {
+  if (req.get('X-HTTP-Method-Override') !== 'PATCH') {
+    res.status(400).json({ error: 'bad_request' });
+    return;
+  }
+  parseJson(req, res, (err) => (err ? next(err) : categorize(req, res, next)));
+});
+
+router.put('/budget/:month/categories/:id', writeLimit, requireWrite, parseJson, write((req) => {
+  const month = pathMonth(req);
+  const categoryId = pathId(req.params.id);
+  const { budgeted } = strictBody(req, ['budgeted']);
+  if (!isCents(budgeted, 0, 1000000000000)) throw badRequest();
+  return () => setBudgetedAmount({ tokenId: req.deviceToken.id, month, categoryId, budgeted });
+}));
+
+router.post('/budget/:month/move', writeLimit, requireWrite, parseJson, write((req) => {
+  const month = pathMonth(req);
+  const { from, to, amount } = strictBody(req, ['from', 'to', 'amount']);
+  if (!isValidId(from) || !isValidId(to) || from === to || !isCents(amount, 1, 1000000000000)) throw badRequest();
+  return () => moveBudget({ tokenId: req.deviceToken.id, month, from, to, amount });
+}));
+
+// Anything else under /api/mobile/v1 (after auth): not found, never a
+// fall-through to the Actual-session guard.
+router.use((req, res) => {
+  res.status(404).json({ error: 'not_found' });
+});
+
+// Body-parser failures (bad JSON, too large) are the caller's fault; anything
+// else is ours. Never echo the body.
+router.use((err, req, res, next) => {
+  if (err && (err.type === 'entity.parse.failed' || err.type === 'entity.too.large' || err.type === 'encoding.unsupported' || err.type === 'charset.unsupported')) {
+    res.status(400).json({ error: 'bad_request' });
+    return;
+  }
+  fail(res, err);
+});
+
+// Test hook: forget the rate-limit windows and the read cache.
+function resetMobileV1State() {
+  resetRateLimits();
+  cache.clear();
+}
+
+module.exports = router;
+module.exports.resetMobileV1State = resetMobileV1State;

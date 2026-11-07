@@ -22,7 +22,7 @@ test('createToken POSTs the label as JSON and accepts 201', async () => {
   expect(path).toBe('/api/mobile/tokens');
   expect(options.method).toBe('POST');
   expect(options.headers['Content-Type']).toBe('application/json');
-  expect(JSON.parse(options.body)).toEqual({ label: 'Phone' });
+  expect(JSON.parse(options.body)).toEqual({ label: 'Phone', scope: 'read' });
 });
 
 test('revokeToken DELETEs the encoded id and handles the empty 204 body', async () => {
@@ -54,4 +54,10 @@ test('an unreachable API maps to a friendly message without leaking the label', 
   expect(err.message).toBe('Could not reach insights-api.');
   const err2 = await revokeToken('t1').catch((e) => e);
   expect(err2.message).toBe('Could not reach insights-api.');
+});
+
+test('createToken sends scope write when asked', async () => {
+  fetchApi.mockResolvedValue({ ok: true, status: 201, json: async () => ({}) });
+  await createToken('Phone', 'write');
+  expect(JSON.parse(fetchApi.mock.calls[0][1].body)).toEqual({ label: 'Phone', scope: 'write' });
 });
