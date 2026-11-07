@@ -1,6 +1,7 @@
 import { mountWidget } from './mount';
 import { maybeRedirectToReports } from './redirect';
 import PacingBars from './widgets/PacingBars.svelte';
+import { parsePacingConfig } from './widgets/pacing-data';
 import MonthEndNet from './widgets/MonthEndNet.svelte';
 import PaycheckAlertBanner from './widgets/PaycheckAlertBanner.svelte';
 import BillsTimeline from './widgets/BillsTimeline.svelte';
@@ -62,8 +63,12 @@ try {
   // pacing-bars widget below from mounting.
 }
 
-mountWidget('{{INSIGHTS:pacing-bars:', (host, items) => {
-  new PacingBars({ target: host, props: { items } });
+// The body is either the legacy array of category ids / rollups, or
+// {"categoryIds": [...], "allGroups": true} from the builder's "Category
+// Groups" box (see parsePacingConfig).
+mountWidget('{{INSIGHTS:pacing-bars:', (host, config) => {
+  const { items, allGroups } = parsePacingConfig(config);
+  new PacingBars({ target: host, props: { items, allGroups } });
 });
 
 // MonthEndNet takes no config (mount.js still requires the placeholder's body

@@ -437,7 +437,34 @@ describe('Insights placeholders', () => {
   test('pacing-bars to progress', async () => {
     const card = await one('markdown-card', md('pacing-bars', '["c-rent","c-eat"]'));
     expect(card).toMatchObject({ kind: 'progress', format: 'money', title: 'Budget pacing' });
-    expect(card.items).toEqual([{ label: 'Rent', current: 100000, target: 100000 }, { label: 'Eating out', current: 4000, target: 20000 }]);
+    expect(card.items).toEqual([
+      { label: 'Rent', current: 100000, target: 100000, drill: { level: 'payees', categoryId: 'c-rent' } },
+      { label: 'Eating out', current: 4000, target: 20000, drill: { level: 'payees', categoryId: 'c-eat' } },
+    ]);
+  });
+
+  test('pacing-bars rollup items in the legacy array become one drillable row', async () => {
+    const card = await one('markdown-card', md('pacing-bars', '[{"title":"House","budgets":["c-rent","c-power","c-gone"]},"c-eat"]'));
+    expect(card.items).toEqual([
+      { label: 'House', current: 102500, target: 110000, drill: { level: 'categories', categoryIds: ['c-rent', 'c-power'] } },
+      { label: 'Eating out', current: 4000, target: 20000, drill: { level: 'payees', categoryId: 'c-eat' } },
+    ]);
+  });
+
+  test('pacing-bars allGroups: one row per visible expense group, then picked ids; income and hidden left out', async () => {
+    const card = await one('markdown-card', md('pacing-bars', '{"categoryIds":["c-eat"],"allGroups":true}'));
+    expect(card.items).toEqual([
+      { label: 'Bills', current: 102500, target: 110000, drill: { level: 'categories', categoryIds: ['c-rent', 'c-power'] } },
+      { label: 'Fun', current: 4000, target: 20000, drill: { level: 'categories', categoryIds: ['c-eat'] } },
+      { label: 'Eating out', current: 4000, target: 20000, drill: { level: 'payees', categoryId: 'c-eat' } },
+    ]);
+    const only = await one('markdown-card', md('pacing-bars', '{"categoryIds":[],"allGroups":true}'));
+    expect(only.items.map((i) => i.label)).toEqual(['Bills', 'Fun']);
+  });
+
+  test('pacing-bars object without allGroups behaves like the picked ids', async () => {
+    const card = await one('markdown-card', md('pacing-bars', '{"categoryIds":["c-power"]}'));
+    expect(card.items.map((i) => i.label)).toEqual(['Power']);
   });
 
   test('pacing-bars with no ids shows spending categories with something available', async () => {

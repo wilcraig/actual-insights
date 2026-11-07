@@ -1,4 +1,4 @@
-import { buildPlaceholder } from '../../src/widget-builder/placeholder';
+import { buildPlaceholder, pacingBody } from '../../src/widget-builder/placeholder';
 
 test('a single-field widget emits the raw value, not a keyed object', () => {
   const result = buildPlaceholder(
@@ -27,4 +27,16 @@ test('a value needing JSON escaping round-trips through JSON.parse unchanged', (
   const result = buildPlaceholder('pacing-bars', [{ key: 'categoryIds' }], { categoryIds: [id] });
   const jsonBody = result.slice('{{INSIGHTS:pacing-bars:'.length, -'}}'.length);
   expect(JSON.parse(jsonBody)).toEqual([id]);
+});
+
+test('pacingBody: legacy bare array unless Category Groups is ticked, then the object', () => {
+  expect(pacingBody({ categoryIds: ['a', 'b'], allGroups: false })).toEqual(['a', 'b']);
+  expect(pacingBody({ categoryIds: ['a'] })).toEqual(['a']);
+  expect(pacingBody({ categoryIds: ['a'], allGroups: true })).toEqual({ categoryIds: ['a'], allGroups: true });
+  expect(pacingBody({ categoryIds: [], allGroups: true })).toEqual({ categoryIds: [], allGroups: true });
+});
+
+test('a widget-supplied body function overrides the generic rule', () => {
+  const result = buildPlaceholder('pacing-bars', [{ key: 'categoryIds' }, { key: 'allGroups' }], { categoryIds: ['a'], allGroups: true }, pacingBody);
+  expect(result).toBe('{{INSIGHTS:pacing-bars:{"categoryIds":["a"],"allGroups":true}}}');
 });

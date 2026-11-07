@@ -25,11 +25,13 @@ beforeEach(() => {
   validateToken.mockResolvedValue(true);
 });
 
-test('flattens non-hidden category groups to { id, name }', async () => {
+test('flattens non-hidden category groups with their visible category ids and income/transfer flags', async () => {
   getActualClient.mockResolvedValue({
     getCategoryGroups: jest.fn(async () => [
-      { id: 'group1', name: 'Everyday Expenses', hidden: false, categories: [] },
+      { id: 'group1', name: 'Everyday Expenses', hidden: false, categories: [{ id: 'c1', name: 'A' }, { id: 'c2', name: 'B', hidden: true }] },
       { id: 'group2', name: 'Archived Group', hidden: true, categories: [] },
+      { id: 'group3', name: 'Personal Income', hidden: false, categories: [{ id: 'c3', name: 'Pay' }] },
+      { id: 'group4', name: 'Transfers', hidden: false, categories: [{ id: 'c4', name: 'Move' }] },
     ]),
   });
 
@@ -37,7 +39,11 @@ test('flattens non-hidden category groups to { id, name }', async () => {
     const res = await fetch(`${base}/api/category-groups`, { headers: AUTH_HEADERS });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
-      groups: [{ id: 'group1', name: 'Everyday Expenses' }],
+      groups: [
+        { id: 'group1', name: 'Everyday Expenses', isIncome: false, isTransfer: false, categoryIds: ['c1'] },
+        { id: 'group3', name: 'Personal Income', isIncome: true, isTransfer: false, categoryIds: ['c3'] },
+        { id: 'group4', name: 'Transfers', isIncome: false, isTransfer: true, categoryIds: ['c4'] },
+      ],
     });
   });
 });

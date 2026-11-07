@@ -362,6 +362,17 @@ function cardId(widget, index, used) {
   return id;
 }
 
+// A drill is passed through only in the exact shapes the contract allows.
+function cleanDrill(drill) {
+  if (!drill || typeof drill !== 'object') return null;
+  if (drill.level === 'payees' && ID_PATTERN.test(String(drill.categoryId))) return { level: 'payees', categoryId: drill.categoryId };
+  if (drill.level === 'categories' && Array.isArray(drill.categoryIds)) {
+    const ids = [...new Set(drill.categoryIds.filter((id) => typeof id === 'string' && ID_PATTERN.test(id)))].slice(0, 200);
+    if (ids.length > 0) return { level: 'categories', categoryIds: ids };
+  }
+  return null;
+}
+
 async function buildCard(ctx, widget, id, timeoutMs) {
   const meta = parseMeta(widget.meta);
   const mapper = MAPPERS[widget.type];
@@ -383,7 +394,12 @@ async function buildCard(ctx, widget, id, timeoutMs) {
     }
     if (card.kind === 'calendar') card.days = card.days.map((d) => ({ date: d.date, value: money(d.value) }));
     if (card.kind === 'progress') {
-      card.items = card.items.slice(0, MAX_ITEMS).map((i) => ({ label: clip(i.label), current: money(i.current), target: money(i.target) }));
+      card.items = card.items.slice(0, MAX_ITEMS).map((i) => {
+        const item = { label: clip(i.label), current: money(i.current), target: money(i.target) };
+        const drill = cleanDrill(i.drill);
+        if (drill) item.drill = drill;
+        return item;
+      });
     }
     if (card.kind === 'breakdown' && (card.total === undefined || card.items.length > MAX_ITEMS)) Object.assign(card, capItems(card.items));
     if (card.kind === 'stat') {

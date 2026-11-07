@@ -1,3 +1,5 @@
+import { pacingBody } from './placeholder';
+
 // Widget types the widget-builder panel can configure. Only widgets with a
 // mount.js consumer belong here; add an entry in the PR that implements the widget.
 export const WIDGET_REGISTRY = [
@@ -5,8 +7,22 @@ export const WIDGET_REGISTRY = [
     id: 'pacing-bars',
     label: 'Pacing bars',
     fields: [
-      { key: 'categoryIds', type: 'category-multiselect', label: 'Categories' },
+      {
+        key: 'categoryIds',
+        type: 'category-multiselect',
+        label: 'Categories',
+        // Not needed once "Category Groups" is ticked.
+        optionalWhen: 'allGroups',
+      },
+      {
+        key: 'allGroups',
+        type: 'checkbox',
+        label: 'Category Groups',
+        help: 'Shows one pacing bar per category group; new groups are included automatically.',
+      },
     ],
+    // Legacy bare array unless the box is ticked (see pacingBody).
+    toBody: pacingBody,
   },
   {
     id: 'month-end-net',

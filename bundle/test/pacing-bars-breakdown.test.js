@@ -133,3 +133,63 @@ test('a rollup row is also a real <button>, and clicking it opens the breakdown 
   expect(lastCall[0]).toContain('level=categories');
   expect(lastCall[0]).toContain('categoryIds=catA%2CcatB');
 });
+
+test('allGroups: loads /api/category-groups, draws one rollup bar per expense group, and a group bar drills into its categories', async () => {
+  fetchApi.mockImplementation(async (url) => {
+    if (url === '/api/category-groups') {
+      return jsonResponse({
+        groups: [
+          { id: 'g1', name: 'Everyday Expenses', isIncome: false, isTransfer: false, categoryIds: ['catA', 'catB'] },
+          { id: 'g2', name: 'Personal Income', isIncome: true, isTransfer: false, categoryIds: ['catI'] },
+        ],
+      });
+    }
+    if (url.startsWith('/api/budget-pacing')) {
+      return jsonResponse({
+        daysElapsed: 10,
+        daysInMonth: 30,
+        categories: [
+          { id: 'catA', name: 'Groceries', groupId: 'g1', groupName: 'Everyday Expenses', spent: 4000, balance: 6000 },
+          { id: 'catB', name: 'Fuel', groupId: 'g1', groupName: 'Everyday Expenses', spent: 1000, balance: 1000 },
+        ],
+      });
+    }
+    return jsonResponse({ total: 0, slices: [] });
+  });
+
+  document.body.innerHTML = '<div id="host"></div>';
+  const target = document.getElementById('host');
+  new PacingBars({ target, props: { items: [], allGroups: true } });
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const pacingCall = fetchApi.mock.calls.find(([url]) => url.startsWith('/api/budget-pacing'));
+  expect(decodeURIComponent(pacingCall[0])).toContain('categories=catA,catB');
+  expect(decodeURIComponent(pacingCall[0])).not.toContain('catI');
+
+  const rows = target.querySelectorAll('button.pacing-row');
+  expect(rows).toHaveLength(1);
+  expect(rows[0].classList.contains('pacing-row--rollup')).toBe(true);
+  expect(rows[0].textContent).toContain('Everyday Expenses');
+
+  rows[0].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+
+  expect(document.body.querySelector('.actualmint-breakdown-modal-backdrop')).not.toBeNull();
+  const lastCall = fetchApi.mock.calls[fetchApi.mock.calls.length - 1];
+  expect(lastCall[0]).toContain('level=categories');
+  expect(decodeURIComponent(lastCall[0])).toContain('categoryIds=catA,catB');
+});
+
+test('allGroups: a failing /api/category-groups shows an error instead of loading forever', async () => {
+  fetchApi.mockResolvedValue(jsonResponse({}, false, 500));
+  document.body.innerHTML = '<div id="host"></div>';
+  const target = document.getElementById('host');
+  new PacingBars({ target, props: { items: [], allGroups: true } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(target.querySelector('[role="alert"]').textContent).toContain('500');
+});

@@ -50,17 +50,81 @@ function spendingCategories(budgetMonth) {
   return out;
 }
 
-async function pacingBars(ctx, config) {
-  const ids = new Set(asIdList(config));
-  const budgetMonth = await ctx.budgetMonth();
+const MAX_DRILL_IDS = 200;
+
+// What the pacing widget paces against: budget plus carryover (the web's
+// `balance + spent`, with spent as positive money out).
+const spentOf = (c) => -(c.spent ?? 0);
+const availableOf = (c) => (c.balance ?? 0) + spentOf(c);
+
+// The three config shapes of the placeholder body: the legacy bare array
+// (category id strings and `{title, budgets}` rollups), or the object
+// `{categoryIds, allGroups}` the widget builder's "Category Groups" box makes.
+function parsePacingConfig(config) {
+  const object = config && typeof config === 'object' && !Array.isArray(config);
+  const list = Array.isArray(config) ? config : object && Array.isArray(config.categoryIds) ? config.categoryIds : [];
   const items = [];
-  for (const group of budgetMonth.categoryGroups || []) {
-    for (const c of group.categories || []) {
-      const spent = Math.max(0, -(c.spent ?? 0));
-      // What the pacing widget paces against: budget plus carryover.
-      const available = (c.balance ?? 0) + spent;
-      if (ids.size > 0 ? !ids.has(c.id) : isIncomeGroup(group) || isTransferGroup(group) || available <= 0) continue;
-      items.push({ label: c.name, current: spent, target: Math.max(0, available) });
+  for (const item of list) {
+    if (typeof item === 'string') items.push(item);
+    else if (item && typeof item === 'object' && typeof item.title === 'string' && Array.isArray(item.budgets)) {
+      items.push({ title: item.title, budgets: item.budgets.filter((v) => typeof v === 'string') });
+    }
+  }
+  return { items, allGroups: Boolean(object && config.allGroups === true) };
+}
+
+// A single category keeps its long-standing mobile numbers: spent never goes
+// below zero before the carryover-aware available amount is worked out.
+function categoryRow(c) {
+  const spent = Math.max(0, spentOf(c));
+  return { label: c.name, current: spent, target: Math.max(0, (c.balance ?? 0) + spent), drill: { level: 'payees', categoryId: c.id } };
+}
+
+function rollupRow(title, members) {
+  return {
+    label: title,
+    current: Math.max(0, members.reduce((sum, c) => sum + spentOf(c), 0)),
+    target: Math.max(0, members.reduce((sum, c) => sum + availableOf(c), 0)),
+    drill: { level: 'categories', categoryIds: members.map((c) => c.id).slice(0, MAX_DRILL_IDS) },
+  };
+}
+
+async function pacingBars(ctx, config) {
+  const { items: picked, allGroups } = parsePacingConfig(config);
+  const budgetMonth = await ctx.budgetMonth();
+  const byId = new Map();
+  for (const group of budgetMonth.categoryGroups || []) for (const c of group.categories || []) byId.set(c.id, c);
+  const items = [];
+
+  if (allGroups) {
+    // One rollup per visible expense group with something in it; a group added
+    // later shows up by itself.
+    for (const group of budgetMonth.categoryGroups || []) {
+      if (group.hidden || isIncomeGroup(group) || isTransferGroup(group)) continue;
+      const members = (group.categories || []).filter((c) => !c.hidden);
+      if (members.length > 0) items.push(rollupRow(group.name, members));
+    }
+  }
+
+  if (picked.length > 0) {
+    for (const item of picked) {
+      if (typeof item === 'string') {
+        const c = byId.get(item);
+        if (!c) continue;
+        items.push(categoryRow(c));
+      } else {
+        const members = item.budgets.map((id) => byId.get(id)).filter(Boolean);
+        if (members.length > 0) items.push(rollupRow(item.title, members));
+      }
+    }
+  } else if (!allGroups) {
+    // No selection at all: every spending category with something available.
+    for (const group of budgetMonth.categoryGroups || []) {
+      if (isIncomeGroup(group) || isTransferGroup(group)) continue;
+      for (const c of group.categories || []) {
+        const row = categoryRow(c);
+        if (row.target > 0) items.push(row);
+      }
     }
   }
   return { kind: 'progress', format: 'money', items, subtitle: ctx.month };

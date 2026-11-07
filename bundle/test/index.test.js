@@ -11,7 +11,14 @@ vi.mock('../src/redirect', () => ({
     throw new DOMException('blocked', 'SecurityError');
   }),
 }));
-vi.mock('../src/widgets/PacingBars.svelte', () => ({ default: class {} }));
+let lastPacingBarsProps = null;
+vi.mock('../src/widgets/PacingBars.svelte', () => ({
+  default: class {
+    constructor({ props }) {
+      lastPacingBarsProps = props;
+    }
+  },
+}));
 let lastSpendingHeatmapProps = null;
 vi.mock('../src/widgets/SpendingHeatmap.svelte', () => ({
   default: class {
@@ -116,4 +123,26 @@ test('spending-heatmap mount callback accepts both a bare range string (builder 
 
   callback(document.createElement('div'), {});
   expect(lastSpendingHeatmapProps).toEqual({ range: 'month' });
+});
+
+test('pacing-bars mount callback accepts the legacy array and the {categoryIds, allGroups} object', async () => {
+  vi.resetModules();
+  lastPacingBarsProps = null;
+
+  const { mountWidget } = await import('../src/mount');
+  await import('../src/index.js');
+
+  const [, callback] = mountWidget.mock.calls.find(([prefix]) => prefix === '{{INSIGHTS:pacing-bars:');
+
+  callback(document.createElement('div'), ['catA', { title: 'T', budgets: ['catB'] }]);
+  expect(lastPacingBarsProps).toEqual({ items: ['catA', { title: 'T', budgets: ['catB'] }], allGroups: false });
+
+  callback(document.createElement('div'), { categoryIds: ['catA'], allGroups: true });
+  expect(lastPacingBarsProps).toEqual({ items: ['catA'], allGroups: true });
+
+  callback(document.createElement('div'), { allGroups: true });
+  expect(lastPacingBarsProps).toEqual({ items: [], allGroups: true });
+
+  callback(document.createElement('div'), null);
+  expect(lastPacingBarsProps).toEqual({ items: [], allGroups: false });
 });

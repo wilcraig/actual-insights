@@ -1,6 +1,7 @@
 const express = require('express');
 
 const { getActualClient, syncIfDue } = require('../actual-client');
+const { isIncomeGroup, isTransferGroup } = require('../cash-flow-data');
 
 const router = express.Router();
 
@@ -23,7 +24,16 @@ router.get('/', async (req, res, next) => {
       if (group.hidden) {
         continue;
       }
-      groups.push({ id: group.id, name: group.name });
+      // Beyond { id, name }: what the pacing widget's "Category Groups" mode
+      // needs to build one rollup per group (visible categories only, and
+      // whether the group is income or transfers, which it leaves out).
+      groups.push({
+        id: group.id,
+        name: group.name,
+        isIncome: isIncomeGroup(group),
+        isTransfer: isTransferGroup(group),
+        categoryIds: (group.categories || []).filter((category) => !category.hidden).map((category) => category.id),
+      });
     }
 
     res.status(200).json({ groups });
