@@ -65,10 +65,11 @@ try {
 
 // The body is either the legacy array of category ids / rollups, or
 // {"categoryIds": [...], "allGroups": true} from the builder's "Category
-// Groups" box (see parsePacingConfig).
+// Groups" box, optionally with "groupIds" (which groups, in which order);
+// see parsePacingConfig.
 mountWidget('{{INSIGHTS:pacing-bars:', (host, config) => {
-  const { items, allGroups } = parsePacingConfig(config);
-  new PacingBars({ target: host, props: { items, allGroups } });
+  const { items, allGroups, groupIds } = parsePacingConfig(config);
+  new PacingBars({ target: host, props: { items, allGroups, groupIds } });
 });
 
 // MonthEndNet takes no config (mount.js still requires the placeholder's body

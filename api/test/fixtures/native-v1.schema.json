@@ -166,6 +166,7 @@
         "payee",
         "amount",
         "category",
+        "categoryGroup",
         "notes",
         "cleared",
         "transfer",
@@ -227,11 +228,22 @@
         "split": {
           "type": "boolean",
           "description": "Parent of a split. Cannot be categorized here."
+        },
+        "categoryGroup": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/name"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Name of the category's group, null when uncategorized."
         }
       }
     },
     "transactionsResponse": {
-      "description": "GET /transactions?account=<id>&uncategorized=1&limit=<1..100, default 50>&cursor=<opaque>. Newest first. account omitted = all accounts. uncategorized=1 keeps only expense or income rows with no category that are not transfers and not split parents. Off-budget accounts are never in the uncategorized view.",
+      "description": "GET /transactions?account=<id>&group=<id>&category=<id>&uncategorized=1&limit=<1..100, default 50>&cursor=<opaque>. Newest first. account omitted = all accounts. group (a category group id) and category (a category id) filter by where the money went; at most one of uncategorized, group, category may be given (else 400). uncategorized=1 keeps only rows with no category that are not transfers and not split parents; off-budget accounts are never in the uncategorized view. uncategorizedCount is present on the first page only (same account filter).",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -465,12 +477,10 @@
       }
     },
     "transactionUpdateRequest": {
-      "description": "PATCH /transactions/<id>. Write scope. Sets or clears the category of one non-transfer, non-split transaction.",
+      "description": "PATCH /transactions/<id> (write scope). Any of category (id or null to clear; not allowed on transfers or split parents), notes (string up to 500, or null to clear), cleared (boolean). At least one key.",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "category"
-      ],
+      "minProperties": 1,
       "properties": {
         "category": {
           "oneOf": [
@@ -481,23 +491,19 @@
               "type": "null"
             }
           ]
-        }
-      }
-    },
-    "transactionResponse": {
-      "description": "Response to PATCH /transactions/<id>: the transaction after the change.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "schema",
-        "transaction"
-      ],
-      "properties": {
-        "schema": {
-          "const": 1
         },
-        "transaction": {
-          "$ref": "#/definitions/transaction"
+        "notes": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/note"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cleared": {
+          "type": "boolean"
         }
       }
     },
@@ -786,6 +792,16 @@
               "type": "number",
               "minimum": -10000000000000,
               "maximum": 10000000000000
+            },
+            "chart": {
+              "type": "string",
+              "enum": [
+                "bars",
+                "donut",
+                "pie",
+                "treemap"
+              ],
+              "description": "How to draw it. Absent means bars."
             }
           }
         },
@@ -969,7 +985,7 @@
       ]
     },
     "reportsResponse": {
-      "description": "GET /reports. The dashboard's cards in reading order (top to bottom, then left to right), at most 40. A card whose data could not be computed is sent as kind 'unsupported' so one bad card never hides the rest.",
+      "description": "GET /reports?report=<id>. Without report: the first dashboard page. With the id of a dashboard page: that page's cards. With the id of a saved custom report: a single card. Cards come in reading order, at most 40; a card that could not be computed is sent as kind 'unsupported'. Unknown report id is 404.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -1143,6 +1159,268 @@
           "items": {
             "$ref": "#/definitions/spendingTransaction"
           }
+        }
+      }
+    },
+    "transactionDetail": {
+      "description": "One transaction with everything the detail screen shows.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "date",
+        "accountId",
+        "accountName",
+        "payee",
+        "amount",
+        "category",
+        "categoryGroup",
+        "notes",
+        "cleared",
+        "reconciled",
+        "transfer",
+        "split",
+        "importedPayee",
+        "importedId",
+        "recurring",
+        "tags",
+        "splits",
+        "transferAccountName"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/id"
+        },
+        "date": {
+          "$ref": "#/definitions/date"
+        },
+        "accountId": {
+          "$ref": "#/definitions/id"
+        },
+        "accountName": {
+          "$ref": "#/definitions/name"
+        },
+        "payee": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/name"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "amount": {
+          "$ref": "#/definitions/money"
+        },
+        "category": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/categoryRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "categoryGroup": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/name"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "notes": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/note"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cleared": {
+          "type": "boolean"
+        },
+        "reconciled": {
+          "type": "boolean",
+          "description": "Locked by a reconciliation in Actual. Read only here."
+        },
+        "transfer": {
+          "type": "boolean"
+        },
+        "split": {
+          "type": "boolean"
+        },
+        "importedPayee": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/name"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The description the bank or SimpleFIN sent, before any payee rule renamed it. Null when entered by hand."
+        },
+        "importedId": {
+          "oneOf": [
+            {
+              "type": "string",
+              "maxLength": 200
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The import reference (for SimpleFIN a long id), for support questions."
+        },
+        "recurring": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/name"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Name of the schedule this transaction belongs to."
+        },
+        "tags": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "maxLength": 50
+          },
+          "description": "Tags found in the notes (#tag), without the #."
+        },
+        "splits": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "category",
+              "amount",
+              "notes"
+            ],
+            "properties": {
+              "category": {
+                "oneOf": [
+                  {
+                    "$ref": "#/definitions/categoryRef"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "amount": {
+                "$ref": "#/definitions/money"
+              },
+              "notes": {
+                "oneOf": [
+                  {
+                    "$ref": "#/definitions/note"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "transferAccountName": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/name"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "For transfers, the account on the other side."
+        }
+      }
+    },
+    "transactionDetailResponse": {
+      "description": "GET /transactions/<id> and the response to PATCH /transactions/<id>: the transaction after any change.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "transaction"
+      ],
+      "properties": {
+        "schema": {
+          "const": 1
+        },
+        "transaction": {
+          "$ref": "#/definitions/transactionDetail"
+        }
+      }
+    },
+    "reportListResponse": {
+      "description": "GET /report-list. Everything the Home menu can show: each dashboard page and each saved custom report. defaultId is the server's default (the first dashboard page); a device may pick its own.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "generatedAt",
+        "reports",
+        "defaultId"
+      ],
+      "properties": {
+        "schema": {
+          "const": 1
+        },
+        "generatedAt": {
+          "$ref": "#/definitions/generatedAt"
+        },
+        "reports": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "title",
+              "kind"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/definitions/id"
+              },
+              "title": {
+                "$ref": "#/definitions/name"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "dashboard",
+                  "custom"
+                ]
+              }
+            }
+          }
+        },
+        "defaultId": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/id"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     }

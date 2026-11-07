@@ -94,6 +94,8 @@ describe('parsePacingConfig', () => {
     expect(parsePacingConfig(['a'])).toEqual({ items: ['a'], allGroups: false });
     expect(parsePacingConfig({ categoryIds: ['a'], allGroups: true })).toEqual({ items: ['a'], allGroups: true });
     expect(parsePacingConfig({ categoryIds: ['a'] })).toEqual({ items: ['a'], allGroups: false });
+    expect(parsePacingConfig({ categoryIds: [], allGroups: true, groupIds: ['g1', 3, 'g2'] })).toEqual({ items: [], allGroups: true, groupIds: ['g1', 'g2'] });
+    expect(parsePacingConfig({ categoryIds: [], allGroups: true, groupIds: 'g1' })).toEqual({ items: [], allGroups: true });
     expect(parsePacingConfig({ allGroups: 'yes' })).toEqual({ items: [], allGroups: false });
     expect(parsePacingConfig(null)).toEqual({ items: [], allGroups: false });
     expect(parsePacingConfig('x')).toEqual({ items: [], allGroups: false });
@@ -120,6 +122,20 @@ describe('buildPacingItems', () => {
       { title: 'Fun', budgets: ['c5'] },
       'c9',
     ]);
+  });
+
+  test('groupIds: only those groups, in exactly that order; unknown ids and duplicates ignored; later groups not added', () => {
+    expect(buildPacingItems({ items: ['c9'], allGroups: true, groupIds: ['g5', 'gone', 'g1', 'g5', 'g2', 'g3'] }, groups)).toEqual([
+      { title: 'Fun', budgets: ['c5'] },
+      { title: 'Usual', budgets: ['c1', 'c2'] },
+      'c9',
+    ]);
+    expect(buildPacingItems({ items: ['c9'], allGroups: true, groupIds: [] }, groups)).toEqual(['c9']);
+    expect(buildPacingItems({ items: [], allGroups: true, groupIds: ['g1'] }, [...groups, { id: 'gNew', name: 'New', categoryIds: ['c7'] }])).toEqual([{ title: 'Usual', budgets: ['c1', 'c2'] }]);
+  });
+
+  test('allGroups without groupIds is every visible group in the given order (existing placeholders)', () => {
+    expect(buildPacingItems({ items: [], allGroups: true }, groups).map((i) => i.title)).toEqual(['Usual', 'Fun']);
   });
 
   test('allGroups tolerates a missing group list', () => {

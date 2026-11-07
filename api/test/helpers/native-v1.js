@@ -28,7 +28,8 @@ function makeFakeActual(overrides = {}) {
       { id: 'a-ret', name: 'Retirement', offbudget: true, closed: false, balance: 9900000 },
       { id: 'a-old', name: 'Old account', offbudget: false, closed: true, balance: 0 },
     ],
-    payees: { 'p-grocer': { name: 'Example Grocer' }, 'p-hw': { name: 'Example Hardware' }, 'p-xfer': { name: 'Everyday Checking', transfer_acct: 'a-chk' } },
+    payees: { 'p-grocer': { name: 'Example Grocer' }, 'p-hw': { name: 'Example Hardware' }, 'p-xfer': { name: 'Everyday Checking', transfer_acct: 'a-chk' }, 'p-xfer2': { name: 'Rainy Day Savings', transfer_acct: 'a-sav' } },
+    schedules: { 's-1': { name: 'Hardware club' } },
     groups: [
       { id: 'g-usual', name: 'Usual Expenses', is_income: false, hidden: false, categories: [
         { id: 'c-groc', name: 'Groceries', is_income: false, hidden: false },
@@ -47,11 +48,14 @@ function makeFakeActual(overrides = {}) {
     toBudget: 163840,
     transactions: [
       { id: 't-01', date: '2026-11-11', account: 'a-chk', payee: 'p-grocer', category: 'c-groc', amount: -8423, notes: null, cleared: true },
-      { id: 't-02', date: '2026-11-10', account: 'a-chk', payee: 'p-hw', category: null, amount: -2399, notes: 'screws', cleared: false },
+      { id: 't-02', date: '2026-11-10', account: 'a-chk', payee: 'p-hw', category: null, amount: -2399, notes: 'screws #house #diy #house', cleared: false, imported_payee: 'EXAMPLE HDWR #1234', imported_id: 'SFIN-0001', schedule: 's-1' },
       { id: 't-03', date: '2026-11-10', account: 'a-chk', payee: 'p-hw', category: null, amount: -100, notes: '', cleared: false },
       { id: 't-04', date: '2026-11-10', account: 'a-sav', payee: 'p-xfer', category: null, amount: 50000, notes: null, cleared: true, transfer_id: 't-04x' },
       { id: 't-05', date: '2026-11-09', account: 'a-chk', payee: 'p-grocer', category: null, amount: -5000, notes: null, cleared: true, is_parent: true },
-      { id: 't-05c', date: '2026-11-09', account: 'a-chk', payee: 'p-grocer', category: null, amount: -2500, notes: null, cleared: true, is_child: true },
+      { id: 't-05c', date: '2026-11-09', account: 'a-chk', payee: 'p-grocer', category: 'c-groc', amount: -2500, notes: 'half', cleared: true, is_child: true, parent_id: 't-05', sort_order: 2 },
+      { id: 't-05d', date: '2026-11-09', account: 'a-chk', payee: 'p-grocer', category: null, amount: -2500, notes: null, cleared: true, is_child: true, parent_id: 't-05', sort_order: 1 },
+      { id: 't-04x', date: '2026-11-10', account: 'a-chk', payee: 'p-xfer2', category: null, amount: -50000, notes: null, cleared: true, transfer_id: 't-04' },
+      { id: 't-11', date: '2026-11-05', account: 'a-chk', payee: 'p-grocer', category: 'c-fuel', amount: -1500, notes: null, cleared: true, reconciled: true },
       { id: 't-06', date: '2026-11-09', account: 'a-chk', payee: 'p-grocer', category: null, amount: -700, notes: null, cleared: true, tombstone: true },
       { id: 't-07', date: '2026-11-08', account: 'a-ret', payee: 'p-grocer', category: null, amount: -900, notes: null, cleared: true },
       { id: 't-08', date: '2026-11-08', account: 'a-old', payee: 'p-grocer', category: null, amount: -800, notes: null, cleared: true },
@@ -64,6 +68,7 @@ function makeFakeActual(overrides = {}) {
     ...overrides,
   };
   const acct = (id) => state.accounts.find((a) => a.id === id) || {};
+  const groupOfCat = (id) => state.groups.find((g) => g.categories.some((c) => c.id === id));
   const catOf = (id) => state.groups.flatMap((g) => g.categories).find((c) => c.id === id);
 
   const value = (row, p) => {
@@ -78,6 +83,9 @@ function makeFakeActual(overrides = {}) {
       case 'transfer_id': return row.transfer_id ?? null;
       case 'tombstone': return Boolean(row.tombstone);
       case 'category': return row.category ?? null;
+      case 'category.group.name': return row.category ? groupOfCat(row.category).name : null;
+      case 'category.group': return row.category ? groupOfCat(row.category).id : null;
+      case 'schedule.name': return row.schedule ? state.schedules[row.schedule].name : null;
       default: return row[p] ?? null;
     }
   };
@@ -127,7 +135,8 @@ function makeFakeActual(overrides = {}) {
       const s = query.serialize();
       if (s.table === 'preferences') return { data: [{ id: 'defaultCurrencyCode', value: state.currency }] };
       if (s.table !== 'transactions') throw new Error('fake AQL: unsupported table');
-      let rows = state.transactions.filter((r) => !r.tombstone && !r.is_child);
+      const all = s.tableOptions && s.tableOptions.splits === 'all';
+      let rows = state.transactions.filter((r) => !r.tombstone && (all || !r.is_child));
       for (const f of s.filterExpressions) rows = rows.filter((r) => matches(r, f));
       if (s.calculation) return { data: rows.length };
       for (const o of [...s.orderExpressions].reverse()) {
@@ -135,7 +144,7 @@ function makeFakeActual(overrides = {}) {
         rows = [...rows].sort((a, b) => (value(a, field) < value(b, field) ? -1 : value(a, field) > value(b, field) ? 1 : 0) * (dir === 'desc' ? -1 : 1));
       }
       if (s.limit != null) rows = rows.slice(0, s.limit);
-      return { data: rows.map((r) => Object.fromEntries(s.selectExpressions.map((f) => [f, f === 'id' || f === 'date' || f === 'account' || f === 'amount' || f === 'notes' || f === 'cleared' ? r[f] : value(r, f)]))) };
+      return { data: rows.map((r) => Object.fromEntries(s.selectExpressions.map((f) => [f, value(r, f)]))) };
     }),
   };
   return client;

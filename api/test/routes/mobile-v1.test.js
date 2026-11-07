@@ -7,11 +7,12 @@ process.env.INSIGHTS_DATA_DIR = DATA_DIR;
 
 jest.mock('../../src/actual-client');
 jest.mock('../../src/auth');
-jest.mock('../../src/mobile/v1/reports', () => ({ buildReports: jest.fn() }));
+jest.mock('../../src/mobile/v1/reports', () => ({ buildReports: jest.fn(), buildReportList: jest.fn() }));
 
 const { getActualClient, syncIfDue } = require('../../src/actual-client');
 const { validateToken } = require('../../src/auth');
-const { buildReports } = require('../../src/mobile/v1/reports');
+const { buildReports, buildReportList } = require('../../src/mobile/v1/reports');
+const { HttpError } = require('../../src/mobile/v1/common');
 const store = require('../../src/mobile-tokens-store');
 const { expectValid, isValid, examples, makeFakeActual } = require('../helpers/native-v1');
 
@@ -67,6 +68,8 @@ beforeEach(async () => {
   syncIfDue.mockResolvedValue(undefined);
   buildReports.mockReset();
   buildReports.mockImplementation(async () => JSON.parse(JSON.stringify(examples.reportsResponse)));
+  buildReportList.mockReset();
+  buildReportList.mockImplementation(async () => JSON.parse(JSON.stringify(examples.reportListResponse)));
   jest.spyOn(console, 'error').mockImplementation(() => {});
   jest.useFakeTimers({ now: NOW, doNotFake: ['nextTick', 'setImmediate', 'setTimeout', 'queueMicrotask'] });
 });
@@ -78,7 +81,7 @@ afterEach(() => {
 
 describe('the contract examples', () => {
   test('every example response validates, and drift is rejected', () => {
-    for (const name of ['me', 'accountsResponse', 'transactionsResponse', 'categoriesResponse', 'budgetMonthResponse', 'transactionResponse', 'budgetChangeResponse', 'reportsResponse', 'error']) {
+    for (const name of ['me', 'accountsResponse', 'transactionsResponse', 'categoriesResponse', 'budgetMonthResponse', 'transactionDetailResponse', 'reportListResponse', 'budgetChangeResponse', 'reportsResponse', 'error']) {
       expectValid(name, examples[name]);
     }
     expect(isValid('me', { ...examples.me, extra: 1 })).toBe(false);
@@ -93,7 +96,7 @@ describe('authentication', () => {
     await store.revokeToken(revoked.id, DATA_DIR);
     await withServer(async (base) => {
       const headersList = [{}, { Authorization: '' }, { Authorization: 'Bearer garbage' }, { Authorization: `Basic ${token}` }, { Authorization: `Bearer ${revoked.token}` }, { Authorization: `Bearer ${token.slice(0, -1)}` }, { 'X-ACTUAL-TOKEN': 'valid' }];
-      const endpoints = [['GET', '/me'], ['GET', '/accounts'], ['GET', '/transactions'], ['GET', '/categories'], ['GET', '/budget/2026-11'], ['GET', '/reports'], ['PATCH', '/transactions/t-02'], ['POST', '/transactions/t-02'], ['PUT', '/budget/2026-11/categories/c-groc'], ['POST', '/budget/2026-11/move'], ['GET', '/nothing']];
+      const endpoints = [['GET', '/me'], ['GET', '/accounts'], ['GET', '/transactions'], ['GET', '/categories'], ['GET', '/budget/2026-11'], ['GET', '/reports'], ['PATCH', '/transactions/t-02'], ['GET', '/report-list'], ['PATCH', '/transactions/t-02'], ['POST', '/transactions/t-02'], ['PUT', '/budget/2026-11/categories/c-groc'], ['POST', '/budget/2026-11/move'], ['GET', '/nothing']];
       const seen = [];
       for (const [method, url] of endpoints) {
         for (const headers of headersList) {
@@ -180,14 +183,15 @@ describe('GET /transactions', () => {
     const { token } = await newToken();
     await withServer(async (base) => {
       const body = await json(await get(base, token, '/transactions'), 'transactionsResponse');
-      expect(body.transactions.map((t) => t.id)).toEqual(['t-01', 't-04', 't-03', 't-02', 't-05', 't-07', 't-09', 't-10']);
+      expect(body.transactions.map((t) => t.id)).toEqual(['t-01', 't-04x', 't-04', 't-03', 't-02', 't-05', 't-07', 't-09', 't-10', 't-11']);
       expect(body.nextCursor).toBeNull();
       const byId = Object.fromEntries(body.transactions.map((t) => [t.id, t]));
-      expect(byId['t-01']).toEqual({ id: 't-01', date: '2026-11-11', accountId: 'a-chk', accountName: 'Everyday Checking', payee: 'Example Grocer', amount: -8423, category: { id: 'c-groc', name: 'Groceries' }, notes: null, cleared: true, transfer: false, split: false });
+      expect(byId['t-01']).toEqual({ id: 't-01', date: '2026-11-11', accountId: 'a-chk', accountName: 'Everyday Checking', payee: 'Example Grocer', amount: -8423, category: { id: 'c-groc', name: 'Groceries' }, categoryGroup: 'Usual Expenses', notes: null, cleared: true, transfer: false, split: false });
       expect(byId['t-04']).toMatchObject({ transfer: true, payee: 'Transfer: Everyday Checking', category: null });
       expect(byId['t-05'].split).toBe(true);
       expect(byId['t-03'].notes).toBeNull();
-      expect(byId['t-02'].notes).toBe('screws');
+      expect(byId['t-02'].notes).toBe('screws #house #diy #house');
+      expect(byId['t-02'].categoryGroup).toBeNull();
       expect(byId['t-09'].payee).toBeNull();
     });
   });
@@ -260,7 +264,7 @@ describe('GET /transactions', () => {
         cursor = body.nextCursor;
         pages += 1;
       } while (cursor && pages < 10);
-      expect(seen).toEqual(['t-01', 't-04', 't-03', 't-02', 't-05', 't-07', 't-09', 't-10']);
+      expect(seen).toEqual(['t-01', 't-04x', 't-04', 't-03', 't-02', 't-05', 't-07', 't-09', 't-10', 't-11']);
       expect(new Set(seen).size).toBe(seen.length);
     });
   });
@@ -270,8 +274,8 @@ describe('GET /transactions', () => {
     await withServer(async (base) => {
       const first = await json(await get(base, token, '/transactions?limit=1'), 'transactionsResponse');
       expect(first.nextCursor).toBe('c_2026-11-11_t-01');
-      const all = await json(await get(base, token, '/transactions?limit=8'), 'transactionsResponse');
-      expect(all.transactions).toHaveLength(8);
+      const all = await json(await get(base, token, '/transactions?limit=10'), 'transactionsResponse');
+      expect(all.transactions).toHaveLength(10);
       expect(all.nextCursor).toBeNull();
     });
   });
@@ -303,7 +307,60 @@ describe('GET /transactions', () => {
     const { token } = await newToken();
     await withServer(async (base) => {
       const body = await json(await get(base, token, '/transactions?cursor=c_2026-11-09_zzz'), 'transactionsResponse');
-      expect(body.transactions.map((t) => t.id)).toEqual(['t-05', 't-07', 't-09', 't-10']);
+      expect(body.transactions.map((t) => t.id)).toEqual(['t-05', 't-07', 't-09', 't-10', 't-11']);
+    });
+  });
+
+  test('group and category filter by where the money went; at most one of uncategorized, group, category', async () => {
+    const { token } = await newToken();
+    await withServer(async (base) => {
+      const group = await json(await get(base, token, '/transactions?group=g-usual'), 'transactionsResponse');
+      expect(group.transactions.map((t) => t.id)).toEqual(['t-01', 't-10', 't-11']);
+      expect(group.transactions.every((t) => t.categoryGroup === 'Usual Expenses')).toBe(true);
+      expect(group.uncategorizedCount).toBe(3);
+      const category = await json(await get(base, token, '/transactions?category=c-fuel&account=a-chk'), 'transactionsResponse');
+      expect(category.transactions.map((t) => t.id)).toEqual(['t-10', 't-11']);
+      const none = await json(await get(base, token, '/transactions?group=g-nope'), 'transactionsResponse');
+      expect(none.transactions).toEqual([]);
+      for (const q of ['?group=g-usual&category=c-fuel', '?group=g-usual&uncategorized=1', '?category=c-fuel&uncategorized=1', '?group=', '?group=a%20b', '?category=a&category=b', `?group=${'a'.repeat(65)}`]) {
+        expect([q, (await get(base, token, `/transactions${q}`)).status]).toEqual([q, 400]);
+      }
+    });
+  });
+});
+
+describe('GET /transactions/:id', () => {
+  test('the detail: imported fields, recurring, tags, splits, transfer account', async () => {
+    const { token } = await newToken();
+    await withServer(async (base) => {
+      const plain = (await json(await get(base, token, '/transactions/t-02'), 'transactionDetailResponse')).transaction;
+      expect(plain).toEqual({ id: 't-02', date: '2026-11-10', accountId: 'a-chk', accountName: 'Everyday Checking', payee: 'Example Hardware', amount: -2399, category: null, categoryGroup: null, notes: 'screws #house #diy #house', cleared: false, reconciled: false, transfer: false, split: false, importedPayee: 'EXAMPLE HDWR #1234', importedId: 'SFIN-0001', recurring: 'Hardware club', tags: ['house', 'diy'], splits: [], transferAccountName: null });
+      const manual = (await json(await get(base, token, '/transactions/t-01'), 'transactionDetailResponse')).transaction;
+      expect(manual).toMatchObject({ categoryGroup: 'Usual Expenses', importedPayee: null, importedId: null, recurring: null, tags: [], reconciled: false });
+      const split = (await json(await get(base, token, '/transactions/t-05'), 'transactionDetailResponse')).transaction;
+      expect(split.split).toBe(true);
+      expect(split.splits).toEqual([{ category: { id: 'c-groc', name: 'Groceries' }, amount: -2500, notes: 'half' }, { category: null, amount: -2500, notes: null }]);
+      const xfer = (await json(await get(base, token, '/transactions/t-04'), 'transactionDetailResponse')).transaction;
+      expect(xfer).toMatchObject({ transfer: true, transferAccountName: 'Everyday Checking' });
+      expect((await json(await get(base, token, '/transactions/t-11'), 'transactionDetailResponse')).transaction.reconciled).toBe(true);
+    });
+  });
+
+  test('clips importedId, limits tags; unknown, deleted and split-line ids are 404; bad ids and params 400', async () => {
+    client.state.transactions.find((t) => t.id === 't-03').imported_id = 'x'.repeat(300);
+    client.state.transactions.find((t) => t.id === 't-03').notes = `${Array.from({ length: 30 }, (_, i) => `#t${i}`).join(' ')} #${'y'.repeat(51)} a#b`;
+    const { token } = await newToken();
+    await withServer(async (base) => {
+      const d = (await json(await get(base, token, '/transactions/t-03'), 'transactionDetailResponse')).transaction;
+      expect(d.importedId).toHaveLength(200);
+      expect(d.tags).toHaveLength(20);
+      expect(d.tags[0]).toBe('t0');
+      for (const id of ['t-nope', 't-06', 't-05c']) {
+        const res = await get(base, token, `/transactions/${id}`);
+        expect([id, res.status, await res.text()]).toEqual([id, 404, '{"error":"not_found"}']);
+      }
+      expect((await get(base, token, '/transactions/bad%20id')).status).toBe(400);
+      expect((await get(base, token, '/transactions/t-02?x=1')).status).toBe(400);
     });
   });
 });
@@ -366,10 +423,41 @@ describe('GET /reports', () => {
       const res = await get(base, token, '/reports');
       expect(res.status).toBe(200);
       expect(await json(res, 'reportsResponse')).toEqual(examples.reportsResponse);
-      expect(buildReports).toHaveBeenCalledWith({ client, now: expect.any(Date) });
+      expect(buildReports).toHaveBeenCalledWith({ client, now: expect.any(Date), reportId: undefined });
     });
   });
 
+  test('?report=<id> is passed through and cached per report; bad ids and other params are 400; a builder 404 is a 404', async () => {
+    const { token } = await newToken();
+    await withServer(async (base) => {
+      expect((await get(base, token, '/reports?report=page-main')).status).toBe(200);
+      expect(buildReports).toHaveBeenLastCalledWith({ client, now: expect.any(Date), reportId: 'page-main' });
+      await get(base, token, '/reports');
+      await get(base, token, '/reports?report=page-main');
+      expect(buildReports).toHaveBeenCalledTimes(2);
+      for (const q of ['?report=', '?report=a%20b', `?report=${'a'.repeat(65)}`, '?report=a&report=b', '?id=a']) {
+        expect([q, (await get(base, token, `/reports${q}`)).status]).toEqual([q, 400]);
+      }
+      buildReports.mockRejectedValueOnce(new HttpError(404, 'not_found'));
+      const res = await get(base, token, '/reports?report=gone');
+      expect([res.status, await res.text()]).toEqual([404, '{"error":"not_found"}']);
+    });
+  });
+});
+
+describe('GET /report-list', () => {
+  test('returns the report list builder result, validated', async () => {
+    const { token } = await newToken();
+    await withServer(async (base) => {
+      const res = await get(base, token, '/report-list');
+      expect(await json(res, 'reportListResponse')).toEqual(examples.reportListResponse);
+      expect(buildReportList).toHaveBeenCalledWith({ client, now: expect.any(Date) });
+      expect((await get(base, token, '/report-list?x=1')).status).toBe(400);
+    });
+  });
+});
+
+describe('GET /reports (failure)', () => {
   test('a failing builder is a 500 internal, not cached, and echoes nothing', async () => {
     buildReports.mockRejectedValueOnce(new Error('secret detail'));
     const { token } = await newToken();
@@ -511,14 +599,14 @@ describe('PATCH /transactions/:id', () => {
     await withServer(async (base) => {
       const res = await call(base, token, 'PATCH', '/transactions/t-02', { category: 'c-groc' });
       expect(res.status).toBe(200);
-      const body = await json(res, 'transactionResponse');
-      expect(body.transaction).toMatchObject({ id: 't-02', category: { id: 'c-groc', name: 'Groceries' }, notes: 'screws' });
+      const body = await json(res, 'transactionDetailResponse');
+      expect(body.transaction).toMatchObject({ id: 't-02', category: { id: 'c-groc', name: 'Groceries' }, categoryGroup: 'Usual Expenses', notes: 'screws #house #diy #house', importedId: 'SFIN-0001' });
       expect(client.updateTransaction).toHaveBeenCalledWith('t-02', { category: 'c-groc' });
       expect(client.sync).toHaveBeenCalledTimes(1);
       expect(syncIfDue).not.toHaveBeenCalledWith(expect.anything());
       const lines = auditLines();
       expect(lines).toHaveLength(1);
-      expect(lines[0]).toEqual({ time: NOW.toISOString(), tokenId: id, op: 'transaction.categorize', ids: { transaction: 't-02' }, before: { category: null }, after: { category: 'c-groc' } });
+      expect(lines[0]).toEqual({ time: NOW.toISOString(), tokenId: id, op: 'transaction.update', ids: { transaction: 't-02' }, before: { category: null }, after: { category: 'c-groc' } });
       expect(fs.readFileSync(AUDIT, 'utf8')).not.toContain(token);
     });
   });
@@ -527,9 +615,10 @@ describe('PATCH /transactions/:id', () => {
     const { token } = await newToken('write');
     await withServer(async (base) => {
       for (let i = 0; i < 2; i++) {
-        const body = await json(await call(base, token, 'PATCH', '/transactions/t-01', { category: null }), 'transactionResponse');
+        const body = await json(await call(base, token, 'PATCH', '/transactions/t-01', { category: null }), 'transactionDetailResponse');
         expect(body.transaction.category).toBeNull();
       }
+      expect(auditLines()).toHaveLength(1);
       expect(auditLines()[0]).toMatchObject({ before: { category: 'c-groc' }, after: { category: null } });
     });
   });
@@ -539,7 +628,7 @@ describe('PATCH /transactions/:id', () => {
     await withServer(async (base) => {
       const ok = await call(base, token, 'POST', '/transactions/t-02', { category: 'c-fuel' }, { 'X-HTTP-Method-Override': 'PATCH' });
       expect(ok.status).toBe(200);
-      expect((await json(ok, 'transactionResponse')).transaction.category).toEqual({ id: 'c-fuel', name: 'Fuel' });
+      expect((await json(ok, 'transactionDetailResponse')).transaction.category).toEqual({ id: 'c-fuel', name: 'Fuel' });
       expect(auditLines()).toHaveLength(1);
       for (const extra of [{}, { 'X-HTTP-Method-Override': 'PUT' }, { 'X-HTTP-Method-Override': 'patch' }, { 'X-HTTP-Method-Override': 'DELETE' }, { 'X-HTTP-Method-Override': '' }]) {
         const res = await call(base, token, 'POST', '/transactions/t-03', { category: 'c-fuel' }, extra);
@@ -577,6 +666,12 @@ describe('PATCH /transactions/:id', () => {
         ['t-02', { category: 'c-gone' }, 400], // category in hidden group
         ['t-02', { category: 'c-pay' }, 400], // income
         ['t-02', {}, 400],
+        ['t-02', { notes: 5 }, 400],
+        ['t-02', { notes: 'x'.repeat(501) }, 400],
+        ['t-02', { cleared: 'yes' }, 400],
+        ['t-02', { cleared: null }, 400],
+        ['t-11', { cleared: false }, 400], // reconciled
+        ['t-05c', { notes: 'x' }, 404],
         ['t-02', { category: 5 }, 400],
         ['t-02', { category: '' }, 400],
         ['t-02', { category: 'bad id' }, 400],
@@ -587,6 +682,7 @@ describe('PATCH /transactions/:id', () => {
         ['bad%20id', { category: 'c-groc' }, 400],
       ];
       for (const [id, body, status] of cases) {
+        require('../../src/routes/mobile-v1').resetMobileV1State();
         const res = await call(base, token, 'PATCH', `/transactions/${id}`, body);
         expect([id, JSON.stringify(body), res.status]).toEqual([id, JSON.stringify(body), status]);
         expect(JSON.parse(await res.text())).toEqual({ error: status === 404 ? 'not_found' : 'bad_request' });
@@ -595,6 +691,27 @@ describe('PATCH /transactions/:id', () => {
       expect(client.updateTransaction).not.toHaveBeenCalled();
       expect(client.sync).not.toHaveBeenCalled();
       expect(auditLines()).toEqual([]);
+    });
+  });
+
+  test('notes and cleared: any non-reconciled transaction, changed fields only, audited with notes clipped, answered with the detail', async () => {
+    const { token } = await newToken('write');
+    await withServer(async (base) => {
+      const long = 'n'.repeat(500);
+      const res = await call(base, token, 'PATCH', '/transactions/t-04', { notes: long, cleared: false });
+      expect(res.status).toBe(200);
+      const body = await json(res, 'transactionDetailResponse');
+      expect(body.transaction).toMatchObject({ id: 't-04', notes: long, cleared: false, transfer: true });
+      expect(client.updateTransaction).toHaveBeenCalledWith('t-04', { notes: long, cleared: false });
+      expect(auditLines()[0]).toMatchObject({ op: 'transaction.update', before: { notes: null, cleared: true }, after: { notes: 'n'.repeat(80), cleared: false } });
+      // Unchanged fields are not sent; null clears notes.
+      client.updateTransaction.mockClear();
+      const again = await json(await call(base, token, 'PATCH', '/transactions/t-04', { notes: null, cleared: false }), 'transactionDetailResponse');
+      expect(again.transaction.notes).toBeNull();
+      expect(client.updateTransaction).toHaveBeenCalledWith('t-04', { notes: null });
+      // A reconciled row refuses cleared changes but takes notes and a category.
+      const rec = await json(await call(base, token, 'PATCH', '/transactions/t-11', { notes: 'ok', category: 'c-groc', cleared: true }), 'transactionDetailResponse');
+      expect(rec.transaction).toMatchObject({ notes: 'ok', category: { id: 'c-groc', name: 'Groceries' }, cleared: true, reconciled: true });
     });
   });
 

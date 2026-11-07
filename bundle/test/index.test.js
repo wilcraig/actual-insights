@@ -140,6 +140,9 @@ test('pacing-bars mount callback accepts the legacy array and the {categoryIds, 
   callback(document.createElement('div'), { categoryIds: ['catA'], allGroups: true });
   expect(lastPacingBarsProps).toEqual({ items: ['catA'], allGroups: true });
 
+  callback(document.createElement('div'), { categoryIds: [], allGroups: true, groupIds: ['g2', 'g1'] });
+  expect(lastPacingBarsProps).toEqual({ items: [], allGroups: true, groupIds: ['g2', 'g1'] });
+
   callback(document.createElement('div'), { allGroups: true });
   expect(lastPacingBarsProps).toEqual({ items: [], allGroups: true });
 

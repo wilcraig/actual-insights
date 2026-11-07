@@ -24,6 +24,7 @@ const TX_FIELDS = [
   'payee.transfer_acct',
   'category',
   'category.name',
+  'category.group.name',
   'amount',
   'notes',
   'cleared',
@@ -83,11 +84,29 @@ function mapTransaction(row) {
     payee,
     amount: money(row.amount),
     category,
+    categoryGroup: category && row['category.group.name'] != null ? clip(row['category.group.name']) : null,
     notes,
     cleared: Boolean(row.cleared),
     transfer,
     split: Boolean(row.is_parent),
   };
+}
+
+const MAX_IMPORTED_ID = 200;
+const MAX_TAGS = 20;
+const MAX_TAG = 50;
+const MAX_SPLITS = 50;
+
+// #tags in a note: unique, without the '#', each at most 50 characters, at
+// most 20 of them (a longer one is not a tag, it is a ramble).
+function parseTags(notes) {
+  const tags = [];
+  for (const match of String(notes ?? '').matchAll(/(?<![#\w])#([^\s#]+)/g)) {
+    const tag = match[1];
+    if (tag.length <= MAX_TAG && !tags.includes(tag)) tags.push(tag);
+    if (tags.length >= MAX_TAGS) break;
+  }
+  return tags;
 }
 
 // The same row plus what the write side needs to judge it.
@@ -112,13 +131,16 @@ const UNCATEGORIZED_FILTER = [
   { 'account.closed': false },
 ];
 
-function transactionFilters({ account, uncategorized }) {
+function transactionFilters({ account, uncategorized, group, category }) {
   const filters = [];
   // Without an account, only open accounts' rows: a closed account can't be
   // edited and is not in /accounts either.
   if (account) filters.push({ account });
   else filters.push({ 'account.closed': false });
   if (uncategorized) filters.push(...UNCATEGORIZED_FILTER);
+  // Where the money went: a group matches every category in it.
+  if (group) filters.push({ 'category.group': group });
+  if (category) filters.push({ category });
   return filters;
 }
 
@@ -131,12 +153,12 @@ async function assertAccountExists(client, accountId) {
   if (!accounts.some((a) => a.id === accountId)) throw notFound();
 }
 
-// params: { account?, uncategorized: boolean, limit, cursor? } (already validated).
+// params: { account?, uncategorized: boolean, group?, category?, limit, cursor? } (already validated).
 async function buildTransactions(client, params, now = new Date()) {
-  const { account, uncategorized = false, limit = DEFAULT_LIMIT, cursor } = params;
+  const { account, uncategorized = false, group, category, limit = DEFAULT_LIMIT, cursor } = params;
   if (account) await assertAccountExists(client, account);
 
-  const filters = transactionFilters({ account, uncategorized });
+  const filters = transactionFilters({ account, uncategorized, group, category });
   const pageFilters = [...filters];
   if (cursor) {
     const after = decodeCursor(cursor);
@@ -174,9 +196,59 @@ async function buildTransactions(client, params, now = new Date()) {
   return body;
 }
 
+const DETAIL_FIELDS = [...TX_FIELDS, 'imported_payee', 'imported_id', 'reconciled', 'schedule', 'schedule.name'];
+
+// The detail screen's transaction, or null when there is no such addressable
+// row (unknown, deleted, or a split line, which is never addressable).
+async function buildTransactionDetail(client, id) {
+  const { data } = await client.aqlQuery(baseTransactionQuery().filter({ id }).select(DETAIL_FIELDS).limit(1));
+  const row = data && data[0];
+  const base = mapTransaction(row);
+  if (!base) return null;
+
+  let splits = [];
+  if (row.is_parent) {
+    const children = await client.aqlQuery(
+      q('transactions')
+        .options({ splits: 'all' })
+        .filter({ parent_id: id })
+        .select(['id', 'category', 'category.name', 'amount', 'notes', 'sort_order', 'tombstone'])
+        .orderBy([{ sort_order: 'desc' }, { id: 'asc' }])
+    );
+    splits = ((children && children.data) || [])
+      .filter((c) => c && !c.tombstone)
+      .slice(0, MAX_SPLITS)
+      .map((c) => ({
+        category: isValidId(c.category) ? { id: c.category, name: clip(c['category.name']) } : null,
+        amount: money(c.amount),
+        notes: c.notes == null || c.notes === '' ? null : clip(c.notes, MAX_NOTE),
+      }));
+  }
+
+  let transferAccountName = null;
+  if (row.transfer_id != null) {
+    const paired = await client.aqlQuery(baseTransactionQuery().filter({ id: row.transfer_id }).select(['id', 'account.name']).limit(1));
+    const other = paired && paired.data && paired.data[0];
+    if (other && other['account.name'] != null) transferAccountName = clip(other['account.name']);
+  }
+
+  return {
+    ...base,
+    reconciled: Boolean(row.reconciled),
+    importedPayee: row.imported_payee == null || row.imported_payee === '' ? null : clip(row.imported_payee),
+    importedId: row.imported_id == null || row.imported_id === '' ? null : clip(row.imported_id, MAX_IMPORTED_ID),
+    recurring: row.schedule != null && row['schedule.name'] != null && row['schedule.name'] !== '' ? clip(row['schedule.name']) : null,
+    tags: parseTags(base.notes),
+    splits,
+    transferAccountName,
+  };
+}
+
 async function readTransactionRow(client, id) {
-  const { data } = await client.aqlQuery(baseTransactionQuery().filter({ id }).select(TX_FIELDS).limit(1));
-  return data && data[0] ? mapTransactionForWrite(data[0]) : null;
+  const { data } = await client.aqlQuery(baseTransactionQuery().filter({ id }).select([...TX_FIELDS, 'reconciled']).limit(1));
+  if (!data || !data[0]) return null;
+  const result = mapTransactionForWrite(data[0]);
+  return result && { ...result, reconciled: Boolean(data[0].reconciled) };
 }
 
 async function buildCategories(client, now = new Date()) {
@@ -252,6 +324,8 @@ module.exports = {
   buildCategories,
   buildBudgetMonth,
   readTransactionRow,
+  buildTransactionDetail,
+  parseTags,
   budgetCategory,
   budgetTotals,
   mapTransaction,

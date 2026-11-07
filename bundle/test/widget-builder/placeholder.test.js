@@ -33,7 +33,9 @@ test('pacingBody: legacy bare array unless Category Groups is ticked, then the o
   expect(pacingBody({ categoryIds: ['a', 'b'], allGroups: false })).toEqual(['a', 'b']);
   expect(pacingBody({ categoryIds: ['a'] })).toEqual(['a']);
   expect(pacingBody({ categoryIds: ['a'], allGroups: true })).toEqual({ categoryIds: ['a'], allGroups: true });
-  expect(pacingBody({ categoryIds: [], allGroups: true })).toEqual({ categoryIds: [], allGroups: true });
+  expect(pacingBody({ categoryIds: [], allGroups: true, groupIds: ['g2', 'g1'] })).toEqual({ categoryIds: [], allGroups: true, groupIds: ['g2', 'g1'] });
+  expect(JSON.stringify(pacingBody({ categoryIds: ['a'], allGroups: true, groupIds: ['g1'] }))).toBe('{"categoryIds":["a"],"allGroups":true,"groupIds":["g1"]}');
+  expect(pacingBody({ categoryIds: ['a'], allGroups: false, groupIds: ['g1'] })).toEqual(['a']);
 });
 
 test('a widget-supplied body function overrides the generic rule', () => {

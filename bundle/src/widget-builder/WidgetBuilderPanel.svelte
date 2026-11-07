@@ -6,6 +6,8 @@
   import { WIDGET_REGISTRY } from './registry';
   import { describePickerError } from './picker-error';
   import { fetchApi } from '../api-client';
+  import { visibleExpenseGroups } from '../widgets/pacing-data';
+  import { moveEntry, checkedGroupIds } from './group-order';
 
   // Whether this is shown at all is controlled externally, by
   // mount-toolbar.js attaching/detaching this component's own container
@@ -20,6 +22,38 @@
   let generatedText = $state('');
   let copyStatus = $state('');
   let generatedTextarea = $state(null);
+  // Pacing bars' "Category Groups" list: rows of { id, name, checked } in the
+  // order the user arranges them; null until loaded.
+  let groupRows = $state(null);
+  let groupError = $state('');
+
+  async function loadGroupRows() {
+    groupError = '';
+    groupRows = null;
+    try {
+      const response = await fetchApi('/api/category-groups');
+      const error = describePickerError(response);
+      if (error) {
+        groupError = error;
+        return;
+      }
+      const data = await response.json();
+      if (!Array.isArray(data.groups)) {
+        groupError = describePickerError({ ok: false, status: response.status });
+        return;
+      }
+      groupRows = visibleExpenseGroups(data.groups).map((g) => ({ id: g.id, name: g.name, checked: true }));
+    } catch {
+      groupError = describePickerError(null);
+    }
+  }
+
+  function setAllGroups(checked) {
+    values = { ...values, allGroups: checked };
+    if (checked && groupRows === null && !groupError) loadGroupRows();
+  }
+
+  let showGroupList = $derived(selectedWidget?.id === 'pacing-bars' && values.allGroups === true);
 
   let selectedWidget = $derived(
     WIDGET_REGISTRY.find((widget) => widget.id === selectedWidgetId) ?? null,
@@ -109,6 +143,8 @@
     filterText = {};
     generatedText = '';
     copyStatus = '';
+    groupRows = null;
+    groupError = '';
 
     const widget = WIDGET_REGISTRY.find((w) => w.id === widgetId);
     if (!widget) return;
@@ -157,21 +193,25 @@
   // of them - that's the empty-placeholder pain point this feature exists
   // to prevent. A widget with no fields has nothing to select, so it's
   // always generatable.
-  let canGenerate = $derived(
-    selectedWidget
-      ? selectedWidget.fields.length === 0
-        || selectedWidget.fields.every(
-          (field) => field.optional
-            || field.type === 'checkbox'
-            || (field.optionalWhen && values[field.optionalWhen] === true)
-            || (values[field.key] ?? []).length > 0,
-        )
-      : false,
-  );
+  let canGenerate = $derived.by(() => {
+    if (!selectedWidget) return false;
+    if (selectedWidget.fields.length === 0) return true;
+    // Category Groups ticked: needs a checked group or a picked category.
+    if (showGroupList) {
+      return (groupRows ?? []).some((row) => row.checked) || (values.categoryIds ?? []).length > 0;
+    }
+    return selectedWidget.fields.every(
+      (field) => field.optional
+        || field.type === 'checkbox'
+        || (field.optionalWhen && values[field.optionalWhen] === true)
+        || (values[field.key] ?? []).length > 0,
+    );
+  });
 
   async function handleGenerate() {
     if (!selectedWidget || !canGenerate) return;
-    generatedText = buildPlaceholder(selectedWidget.id, selectedWidget.fields, values, selectedWidget.toBody);
+    const finalValues = showGroupList && groupRows ? { ...values, groupIds: checkedGroupIds(groupRows) } : values;
+    generatedText = buildPlaceholder(selectedWidget.id, selectedWidget.fields, finalValues, selectedWidget.toBody);
     copyStatus = '';
     // Select the textarea's contents immediately so Ctrl/Cmd+C works as a
     // fallback alongside the Copy button, without requiring a manual click.
@@ -214,7 +254,7 @@
                   <input
                     type="checkbox"
                     checked={values[field.key] === true}
-                    onchange={(e) => { values = { ...values, [field.key]: e.target.checked }; }}
+                    onchange={(e) => (field.key === 'allGroups' ? setAllGroups(e.target.checked) : (values = { ...values, [field.key]: e.target.checked }))}
                   />
                   <span class="actualmint-wb-field-label">{field.label}</span>
                 </label>
@@ -260,6 +300,48 @@
               {/if}
             </div>
           {/each}
+
+          {#if showGroupList}
+            <div class="actualmint-wb-field actualmint-wb-groups">
+              <span class="actualmint-wb-field-label">Groups to show, in order</span>
+              {#if groupError}
+                <p class="actualmint-wb-error" role="alert">{groupError}</p>
+              {:else if groupRows === null}
+                <p class="actualmint-wb-loading">Loading…</p>
+              {:else}
+                <ul class="actualmint-wb-options actualmint-wb-group-list">
+                  {#each groupRows as row, index (row.id)}
+                    <li class="actualmint-wb-group-row">
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={row.checked}
+                          aria-label={`Show ${row.name}`}
+                          onchange={(e) => { groupRows = groupRows.map((r) => (r.id === row.id ? { ...r, checked: e.target.checked } : r)); }}
+                        />
+                        {row.name}
+                      </label>
+                      <button
+                        type="button"
+                        class="actualmint-wb-move"
+                        aria-label={`Move ${row.name} up`}
+                        disabled={index === 0}
+                        onclick={() => { groupRows = moveEntry(groupRows, index, -1); }}
+                      >&uarr;</button>
+                      <button
+                        type="button"
+                        class="actualmint-wb-move"
+                        aria-label={`Move ${row.name} down`}
+                        disabled={index === groupRows.length - 1}
+                        onclick={() => { groupRows = moveEntry(groupRows, index, 1); }}
+                      >&darr;</button>
+                    </li>
+                  {/each}
+                </ul>
+                <p class="actualmint-wb-help">Groups created later will not appear until the widget is regenerated.</p>
+              {/if}
+            </div>
+          {/if}
         {/if}
 
         <button
@@ -369,6 +451,21 @@
     margin: 0;
     font-size: 0.8rem;
     color: #555;
+  }
+
+  .actualmint-wb-group-row {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  .actualmint-wb-group-row label {
+    flex: 1;
+  }
+
+  .actualmint-wb-move {
+    cursor: pointer;
+    padding: 0 0.4rem;
   }
 
   .actualmint-wb-filter {

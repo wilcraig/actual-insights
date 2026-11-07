@@ -1,6 +1,6 @@
 const { getActualClient } = require('../../actual-client');
-const { MAX_BUDGETED, badRequest, notFound, clip, isHidden, isIncome, monthWithinWindow } = require('./common');
-const { readTransactionRow, budgetCategory, budgetTotals } = require('./read');
+const { MAX_BUDGETED, badRequest, notFound, isHidden, isIncome, monthWithinWindow } = require('./common');
+const { readTransactionRow, buildTransactionDetail, budgetCategory, budgetTotals } = require('./read');
 const { appendAudit } = require('./audit');
 
 // The write side of /api/mobile/v1. These change a real budget, so every
@@ -47,31 +47,61 @@ async function requireExpenseCategory(client, categoryId) {
   return found;
 }
 
-// Set or clear the category of one transaction.
-async function categorizeTransaction({ tokenId, transactionId, categoryId }) {
+const clipLog = (value) => (typeof value === 'string' ? value.slice(0, 80) : value);
+
+// Change any of a transaction's category, notes and cleared flag (`changes`
+// holds exactly the keys the caller sent). Everything is validated before
+// anything is touched; one updateTransaction carries the fields that really
+// change, and the answer is the transaction detail as it is afterwards.
+async function updateTransactionFields({ tokenId, transactionId, changes }) {
   return exclusive(async () => {
     const client = await getActualClient();
 
     const row = await readTransactionRow(client, transactionId);
     if (!row) throw notFound();
-    if (row.transaction.transfer || row.transaction.split || row.accountClosed) throw badRequest();
+    const current = row.transaction;
 
-    let categoryName = null;
-    if (categoryId !== null) {
-      const { category } = await requireExpenseCategory(client, categoryId);
-      categoryName = clip(category.name);
+    if ('category' in changes) {
+      if (current.transfer || current.split || row.accountClosed) throw badRequest();
+      if (changes.category !== null) await requireExpenseCategory(client, changes.category);
+    }
+    // A reconciliation locks the cleared flag; notes and category stay editable.
+    if ('cleared' in changes && row.reconciled && changes.cleared !== current.cleared) throw badRequest();
+
+    const before = {};
+    const after = {};
+    const fields = {};
+    if ('category' in changes) {
+      const was = current.category ? current.category.id : null;
+      if (changes.category !== was) {
+        fields.category = changes.category;
+        before.category = was;
+        after.category = changes.category;
+      }
+    }
+    if ('notes' in changes) {
+      const next = changes.notes === '' ? null : changes.notes;
+      if (next !== current.notes) {
+        fields.notes = next;
+        before.notes = clipLog(current.notes);
+        after.notes = clipLog(next);
+      }
+    }
+    if ('cleared' in changes && changes.cleared !== current.cleared) {
+      fields.cleared = changes.cleared;
+      before.cleared = current.cleared;
+      after.cleared = changes.cleared;
     }
 
-    const before = row.transaction.category ? row.transaction.category.id : null;
-    await client.updateTransaction(transactionId, { category: categoryId });
-    await appendAudit({ tokenId, op: 'transaction.categorize', ids: { transaction: transactionId }, before: { category: before }, after: { category: categoryId } });
-    await syncNow(client);
+    if (Object.keys(fields).length > 0) {
+      await client.updateTransaction(transactionId, fields);
+      await appendAudit({ tokenId, op: 'transaction.update', ids: { transaction: transactionId }, before, after });
+      await syncNow(client);
+    }
 
-    const after = await readTransactionRow(client, transactionId);
-    const transaction = after
-      ? after.transaction
-      : { ...row.transaction, category: categoryId === null ? null : { id: categoryId, name: categoryName } };
-    return { schema: 1, transaction };
+    const detail = await buildTransactionDetail(client, transactionId);
+    if (!detail) throw notFound();
+    return { schema: 1, transaction: detail };
   });
 }
 
@@ -156,4 +186,4 @@ async function moveBudget({ tokenId, month, from, to, amount }) {
   });
 }
 
-module.exports = { categorizeTransaction, setBudgetedAmount, moveBudget };
+module.exports = { updateTransactionFields, setBudgetedAmount, moveBudget };
