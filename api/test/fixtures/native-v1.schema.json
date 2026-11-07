@@ -785,7 +785,7 @@
               "type": "array",
               "maxItems": 60,
               "items": {
-                "$ref": "#/definitions/point"
+                "$ref": "#/definitions/drillPoint"
               }
             },
             "total": {
@@ -955,6 +955,407 @@
                     "$ref": "#/definitions/money"
                   }
                 }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "title",
+            "value",
+            "min",
+            "max",
+            "format"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/id"
+            },
+            "kind": {
+              "const": "gauge"
+            },
+            "title": {
+              "$ref": "#/definitions/name"
+            },
+            "subtitle": {
+              "$ref": "#/definitions/name"
+            },
+            "value": {
+              "type": "number",
+              "minimum": -10000000000000,
+              "maximum": 10000000000000
+            },
+            "min": {
+              "type": "number",
+              "minimum": -10000000000000,
+              "maximum": 10000000000000
+            },
+            "max": {
+              "type": "number",
+              "minimum": -10000000000000,
+              "maximum": 10000000000000
+            },
+            "format": {
+              "type": "string",
+              "enum": [
+                "money",
+                "number",
+                "percent"
+              ]
+            },
+            "caption": {
+              "$ref": "#/definitions/name"
+            },
+            "bands": {
+              "type": "array",
+              "maxItems": 6,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "from",
+                  "to",
+                  "tone"
+                ],
+                "properties": {
+                  "from": {
+                    "type": "number",
+                    "minimum": -10000000000000,
+                    "maximum": 10000000000000
+                  },
+                  "to": {
+                    "type": "number",
+                    "minimum": -10000000000000,
+                    "maximum": 10000000000000
+                  },
+                  "tone": {
+                    "type": "string",
+                    "enum": [
+                      "good",
+                      "warn",
+                      "bad"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "title",
+            "chart",
+            "format",
+            "labels",
+            "series"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/id"
+            },
+            "kind": {
+              "const": "multiseries"
+            },
+            "title": {
+              "$ref": "#/definitions/name"
+            },
+            "subtitle": {
+              "$ref": "#/definitions/name"
+            },
+            "chart": {
+              "type": "string",
+              "enum": [
+                "line",
+                "area",
+                "stackedArea",
+                "bar",
+                "stackedBar"
+              ]
+            },
+            "format": {
+              "type": "string",
+              "enum": [
+                "money",
+                "number",
+                "percent"
+              ]
+            },
+            "labels": {
+              "type": "array",
+              "maxItems": 400,
+              "items": {
+                "$ref": "#/definitions/name"
+              }
+            },
+            "series": {
+              "type": "array",
+              "maxItems": 12,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "values"
+                ],
+                "properties": {
+                  "name": {
+                    "$ref": "#/definitions/name"
+                  },
+                  "values": {
+                    "type": "array",
+                    "maxItems": 400,
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "number",
+                          "minimum": -10000000000000,
+                          "maximum": 10000000000000
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "title",
+            "format",
+            "nodes",
+            "links"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/id"
+            },
+            "kind": {
+              "const": "sankey"
+            },
+            "title": {
+              "$ref": "#/definitions/name"
+            },
+            "subtitle": {
+              "$ref": "#/definitions/name"
+            },
+            "format": {
+              "type": "string",
+              "enum": [
+                "money",
+                "number",
+                "percent"
+              ]
+            },
+            "nodes": {
+              "type": "array",
+              "maxItems": 80,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "label",
+                  "column"
+                ],
+                "properties": {
+                  "id": {
+                    "$ref": "#/definitions/id"
+                  },
+                  "label": {
+                    "$ref": "#/definitions/name"
+                  },
+                  "column": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 5
+                  }
+                }
+              }
+            },
+            "links": {
+              "type": "array",
+              "maxItems": 300,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "source",
+                  "target",
+                  "value"
+                ],
+                "properties": {
+                  "source": {
+                    "$ref": "#/definitions/id"
+                  },
+                  "target": {
+                    "$ref": "#/definitions/id"
+                  },
+                  "value": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 10000000000000
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "title",
+            "layout",
+            "start",
+            "end",
+            "items"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/id"
+            },
+            "kind": {
+              "const": "timeline"
+            },
+            "title": {
+              "$ref": "#/definitions/name"
+            },
+            "subtitle": {
+              "$ref": "#/definitions/name"
+            },
+            "layout": {
+              "type": "string",
+              "enum": [
+                "horizontal",
+                "vertical"
+              ]
+            },
+            "start": {
+              "$ref": "#/definitions/date"
+            },
+            "end": {
+              "$ref": "#/definitions/date"
+            },
+            "items": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "date",
+                  "title",
+                  "value"
+                ],
+                "properties": {
+                  "date": {
+                    "$ref": "#/definitions/date"
+                  },
+                  "title": {
+                    "$ref": "#/definitions/name"
+                  },
+                  "subtitle": {
+                    "$ref": "#/definitions/name"
+                  },
+                  "value": {
+                    "$ref": "#/definitions/money"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "title",
+            "format",
+            "columns",
+            "rows"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/id"
+            },
+            "kind": {
+              "const": "table"
+            },
+            "title": {
+              "$ref": "#/definitions/name"
+            },
+            "subtitle": {
+              "$ref": "#/definitions/name"
+            },
+            "format": {
+              "type": "string",
+              "enum": [
+                "money",
+                "number",
+                "percent"
+              ]
+            },
+            "columns": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 12,
+              "items": {
+                "$ref": "#/definitions/name"
+              }
+            },
+            "rows": {
+              "type": "array",
+              "maxItems": 200,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "label",
+                  "values"
+                ],
+                "properties": {
+                  "label": {
+                    "$ref": "#/definitions/name"
+                  },
+                  "values": {
+                    "type": "array",
+                    "maxItems": 12,
+                    "items": {
+                      "type": "number",
+                      "minimum": -10000000000000,
+                      "maximum": 10000000000000
+                    }
+                  }
+                }
+              }
+            },
+            "totals": {
+              "type": "array",
+              "maxItems": 12,
+              "items": {
+                "type": "number",
+                "minimum": -10000000000000,
+                "maximum": 10000000000000
               }
             }
           }
@@ -1463,6 +1864,334 @@
               }
             }
           }
+        }
+      }
+    },
+    "drillPoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "label",
+        "value"
+      ],
+      "properties": {
+        "label": {
+          "$ref": "#/definitions/name"
+        },
+        "value": {
+          "type": "number",
+          "minimum": -10000000000000,
+          "maximum": 10000000000000
+        },
+        "drill": {
+          "$ref": "#/definitions/drill"
+        }
+      }
+    },
+    "budgetSeries": {
+      "description": "A repeating budget amount for one category. mode 'months' covers `months` months starting at startMonth; 'until' covers startMonth through untilMonth inclusive; 'indefinite' never ends (the server keeps the next 12 months filled). appliedThrough is the last month the server has written.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "categoryId",
+        "categoryName",
+        "amount",
+        "startMonth",
+        "mode",
+        "months",
+        "untilMonth",
+        "endMonth",
+        "appliedThrough"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/id"
+        },
+        "categoryId": {
+          "$ref": "#/definitions/id"
+        },
+        "categoryName": {
+          "$ref": "#/definitions/name"
+        },
+        "amount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000000
+        },
+        "startMonth": {
+          "$ref": "#/definitions/month"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "months",
+            "until",
+            "indefinite"
+          ]
+        },
+        "months": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 120
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "untilMonth": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/month"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "endMonth": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/month"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Last covered month; null for indefinite."
+        },
+        "appliedThrough": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/month"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "budgetSeriesRequest": {
+      "description": "POST /budget-series (write scope). startMonth must be the current month or later (within 5 years). mode 'months' requires months (1..120) and no untilMonth; 'until' requires untilMonth (>= startMonth, at most 120 months after it) and no months; 'indefinite' takes neither. dryRun true changes nothing and answers budgetSeriesPreviewResponse. One series per category: a second POST for the same category is 409 conflict (use PUT).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "categoryId",
+        "amount",
+        "startMonth",
+        "mode"
+      ],
+      "properties": {
+        "categoryId": {
+          "$ref": "#/definitions/id"
+        },
+        "amount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000000
+        },
+        "startMonth": {
+          "$ref": "#/definitions/month"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "months",
+            "until",
+            "indefinite"
+          ]
+        },
+        "months": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 120
+        },
+        "untilMonth": {
+          "$ref": "#/definitions/month"
+        },
+        "dryRun": {
+          "type": "boolean"
+        }
+      }
+    },
+    "budgetSeriesUpdateRequest": {
+      "description": "PUT /budget-series/<id> (write scope). Same fields as the create request without categoryId; replaces the definition and rewrites every covered month from the later of startMonth and the current month onward. Months before the current month are never touched.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "amount",
+        "startMonth",
+        "mode"
+      ],
+      "properties": {
+        "amount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000000
+        },
+        "startMonth": {
+          "$ref": "#/definitions/month"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "months",
+            "until",
+            "indefinite"
+          ]
+        },
+        "months": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 120
+        },
+        "untilMonth": {
+          "$ref": "#/definitions/month"
+        },
+        "dryRun": {
+          "type": "boolean"
+        }
+      }
+    },
+    "budgetSeriesListResponse": {
+      "description": "GET /budget-series (read scope).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "generatedAt",
+        "series"
+      ],
+      "properties": {
+        "schema": {
+          "const": 1
+        },
+        "generatedAt": {
+          "$ref": "#/definitions/generatedAt"
+        },
+        "series": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "$ref": "#/definitions/budgetSeries"
+          }
+        }
+      }
+    },
+    "budgetSeriesPreviewResponse": {
+      "description": "Dry run: the months a series would write, with the current budgeted amount (before) and the new one (after). Nothing is changed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "dryRun",
+        "categoryId",
+        "categoryName",
+        "changes"
+      ],
+      "properties": {
+        "schema": {
+          "const": 1
+        },
+        "dryRun": {
+          "const": true
+        },
+        "categoryId": {
+          "$ref": "#/definitions/id"
+        },
+        "categoryName": {
+          "$ref": "#/definitions/name"
+        },
+        "changes": {
+          "type": "array",
+          "maxItems": 120,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "month",
+              "before",
+              "after"
+            ],
+            "properties": {
+              "month": {
+                "$ref": "#/definitions/month"
+              },
+              "before": {
+                "$ref": "#/definitions/money"
+              },
+              "after": {
+                "$ref": "#/definitions/money"
+              }
+            }
+          }
+        }
+      }
+    },
+    "budgetSeriesResponse": {
+      "description": "Response to a created or updated series: the series and the months that were written (indefinite series report the months written so far).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "dryRun",
+        "series",
+        "changes"
+      ],
+      "properties": {
+        "schema": {
+          "const": 1
+        },
+        "dryRun": {
+          "const": false
+        },
+        "series": {
+          "$ref": "#/definitions/budgetSeries"
+        },
+        "changes": {
+          "type": "array",
+          "maxItems": 132,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "month",
+              "before",
+              "after"
+            ],
+            "properties": {
+              "month": {
+                "$ref": "#/definitions/month"
+              },
+              "before": {
+                "$ref": "#/definitions/money"
+              },
+              "after": {
+                "$ref": "#/definitions/money"
+              }
+            }
+          }
+        }
+      }
+    },
+    "okResponse": {
+      "description": "Response to DELETE /budget-series/<id>.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "ok"
+      ],
+      "properties": {
+        "schema": {
+          "const": 1
+        },
+        "ok": {
+          "const": true
         }
       }
     }

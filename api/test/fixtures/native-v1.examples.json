@@ -468,5 +468,286 @@
         "notes": "gas for the mower"
       }
     ]
+  },
+  "reportsResponseCharts": {
+    "schema": 1,
+    "generatedAt": "2026-11-12T15:04:05.000Z",
+    "cards": [
+      {
+        "id": "c-1",
+        "kind": "breakdown",
+        "title": "Spending by group",
+        "format": "money",
+        "chart": "donut",
+        "total": 63000,
+        "items": [
+          {
+            "label": "Usual Expenses",
+            "value": 45000,
+            "drill": {
+              "level": "categories",
+              "categoryIds": [
+                "cat-groceries",
+                "cat-fuel"
+              ]
+            }
+          },
+          {
+            "label": "Bills",
+            "value": 18000,
+            "drill": {
+              "level": "categories",
+              "categoryIds": [
+                "cat-rent"
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "c-2",
+        "kind": "gauge",
+        "title": "Savings rate",
+        "subtitle": "This month",
+        "value": 23.5,
+        "min": 0,
+        "max": 100,
+        "format": "percent",
+        "caption": "Target 20%",
+        "bands": [
+          {
+            "from": 0,
+            "to": 10,
+            "tone": "bad"
+          },
+          {
+            "from": 10,
+            "to": 20,
+            "tone": "warn"
+          },
+          {
+            "from": 20,
+            "to": 100,
+            "tone": "good"
+          }
+        ]
+      },
+      {
+        "id": "c-3",
+        "kind": "multiseries",
+        "title": "Account balances",
+        "chart": "stackedArea",
+        "format": "money",
+        "labels": [
+          "2026-08",
+          "2026-09",
+          "2026-10",
+          "2026-11"
+        ],
+        "series": [
+          {
+            "name": "Everyday Checking",
+            "values": [
+              200000,
+              220000,
+              250000,
+              312450
+            ]
+          },
+          {
+            "name": "Rainy Day Savings",
+            "values": [
+              1000000,
+              1010000,
+              null,
+              1050000
+            ]
+          }
+        ]
+      },
+      {
+        "id": "c-4",
+        "kind": "sankey",
+        "title": "Where the money flows",
+        "format": "money",
+        "nodes": [
+          {
+            "id": "n-income",
+            "label": "Income",
+            "column": 0
+          },
+          {
+            "id": "n-usual",
+            "label": "Usual Expenses",
+            "column": 1
+          },
+          {
+            "id": "n-groceries",
+            "label": "Groceries",
+            "column": 2
+          }
+        ],
+        "links": [
+          {
+            "source": "n-income",
+            "target": "n-usual",
+            "value": 45000
+          },
+          {
+            "source": "n-usual",
+            "target": "n-groceries",
+            "value": 45000
+          }
+        ]
+      },
+      {
+        "id": "c-5",
+        "kind": "timeline",
+        "title": "Subscription renewals",
+        "layout": "vertical",
+        "start": "2026-11-12",
+        "end": "2026-12-12",
+        "items": [
+          {
+            "date": "2026-11-15",
+            "title": "Example Streaming",
+            "subtitle": "Entertainment",
+            "value": -1599
+          },
+          {
+            "date": "2026-11-28",
+            "title": "Example Cloud Storage",
+            "value": -299
+          }
+        ]
+      },
+      {
+        "id": "c-6",
+        "kind": "table",
+        "title": "Spending by payee",
+        "format": "money",
+        "columns": [
+          "Oct",
+          "Nov",
+          "Total"
+        ],
+        "rows": [
+          {
+            "label": "Example Grocer",
+            "values": [
+              41000,
+              9500,
+              50500
+            ]
+          },
+          {
+            "label": "Example Hardware",
+            "values": [
+              0,
+              2399,
+              2399
+            ]
+          }
+        ],
+        "totals": [
+          41000,
+          11899,
+          52899
+        ]
+      }
+    ]
+  },
+  "budgetSeriesRequest": {
+    "categoryId": "cat-groceries",
+    "amount": 45000,
+    "startMonth": "2026-12",
+    "mode": "months",
+    "months": 12
+  },
+  "budgetSeriesUpdateRequest": {
+    "amount": 47000,
+    "startMonth": "2026-12",
+    "mode": "until",
+    "untilMonth": "2027-06"
+  },
+  "budgetSeriesListResponse": {
+    "schema": 1,
+    "generatedAt": "2026-11-12T15:04:05.000Z",
+    "series": [
+      {
+        "id": "ser-groceries-0001",
+        "categoryId": "cat-groceries",
+        "categoryName": "Groceries",
+        "amount": 45000,
+        "startMonth": "2026-12",
+        "mode": "months",
+        "months": 12,
+        "untilMonth": null,
+        "endMonth": "2027-11",
+        "appliedThrough": "2027-11"
+      },
+      {
+        "id": "ser-rent-0002",
+        "categoryId": "cat-rent",
+        "categoryName": "Rent",
+        "amount": 150000,
+        "startMonth": "2026-11",
+        "mode": "indefinite",
+        "months": null,
+        "untilMonth": null,
+        "endMonth": null,
+        "appliedThrough": "2027-11"
+      }
+    ]
+  },
+  "budgetSeriesPreviewResponse": {
+    "schema": 1,
+    "dryRun": true,
+    "categoryId": "cat-groceries",
+    "categoryName": "Groceries",
+    "changes": [
+      {
+        "month": "2026-12",
+        "before": 40000,
+        "after": 45000
+      },
+      {
+        "month": "2027-01",
+        "before": 0,
+        "after": 45000
+      }
+    ]
+  },
+  "budgetSeriesResponse": {
+    "schema": 1,
+    "dryRun": false,
+    "series": {
+      "id": "ser-groceries-0001",
+      "categoryId": "cat-groceries",
+      "categoryName": "Groceries",
+      "amount": 45000,
+      "startMonth": "2026-12",
+      "mode": "months",
+      "months": 12,
+      "untilMonth": null,
+      "endMonth": "2027-11",
+      "appliedThrough": "2027-11"
+    },
+    "changes": [
+      {
+        "month": "2026-12",
+        "before": 40000,
+        "after": 45000
+      },
+      {
+        "month": "2027-01",
+        "before": 0,
+        "after": 45000
+      }
+    ]
+  },
+  "okResponse": {
+    "schema": 1,
+    "ok": true
   }
 }

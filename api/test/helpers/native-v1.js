@@ -8,13 +8,19 @@ const examples = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'fixtures
 const ajv = new Ajv({ allErrors: true, strict: false, validateFormats: false });
 ajv.addSchema(schema);
 
+// An example key may carry a suffix naming a variant of one definition
+// (reportsResponseCharts is a reportsResponse holding every chart kind).
+const definitionFor = (name) => (schema.definitions[name] ? name : name.replace(/Charts$/, ''));
+
 function expectValid(definition, body) {
+  definition = definitionFor(definition);
   const validate = ajv.getSchema(`${schema.$id}#/definitions/${definition}`);
   if (!validate) throw new Error(`no definition ${definition}`);
   if (!validate(body)) throw new Error(`${definition} does not match the schema: ${JSON.stringify(validate.errors)}\n${JSON.stringify(body).slice(0, 500)}`);
 }
 
 function isValid(definition, body) {
+  definition = definitionFor(definition);
   return ajv.getSchema(`${schema.$id}#/definitions/${definition}`)(body);
 }
 

@@ -325,6 +325,8 @@ router.post('/budget/:month/move', writeLimit, requireWrite, parseJson, write((r
   return () => moveBudget({ tokenId: req.deviceToken.id, month, from, to, amount });
 }));
 
+require('./mobile-v1-budget-series')(router, { readLimit, writeLimit, requireWrite, parseJson, read, cache, fail, strictQuery, touchToken });
+
 // Anything else under /api/mobile/v1 (after auth): not found, never a
 // fall-through to the Actual-session guard.
 router.use((req, res) => {

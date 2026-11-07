@@ -107,4 +107,18 @@ async function sumsBy(client, column, filter) {
   return (data || []).map((r) => ({ id: r.id ?? null, amount: Number(r.amount) || 0 }));
 }
 
-module.exports = { Unsupported, conditionToFilter, conditionsFilter, txFilter, dailySums, bucketSums, sumsBy, dateRange };
+// Rows of { date, id, amount } grouped by day and one transaction column
+// (the grouped custom reports plot one series per group over time).
+async function sumsByDateAnd(client, column, filter) {
+  const { data } = await client.aqlQuery(
+    q('transactions')
+      .filter(filter)
+      .groupBy(['date', column])
+      .select([{ date: 'date' }, { id: column }, { amount: { $sum: '$amount' } }])
+  );
+  return (data || [])
+    .filter((r) => typeof r.date === 'string')
+    .map((r) => ({ date: r.date, id: r.id ?? null, amount: Number(r.amount) || 0 }));
+}
+
+module.exports = { Unsupported, sumsByDateAnd, conditionToFilter, conditionsFilter, txFilter, dailySums, bucketSums, sumsBy, dateRange };

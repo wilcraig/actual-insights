@@ -1,7 +1,7 @@
 const express = require('express');
 
 const { getActualClient, syncIfDue } = require('../actual-client');
-const { loadMonthCashFlow } = require('../cash-flow-data');
+const { loadMonthCashFlow, savingsRateFromFlow } = require('../cash-flow-data');
 
 const MONTH_PATTERN = /^\d{4}-\d{2}$/;
 
@@ -36,14 +36,7 @@ router.get('/', async (req, res, next) => {
     await syncIfDue(client);
 
     const flow = await loadMonthCashFlow(client, month);
-    const investmentIds = new Set(parseIdList(investmentGroupIds));
-    const investmentCents = flow.groups
-      .filter((group) => investmentIds.has(group.id))
-      .reduce((sum, group) => sum + group.amountCents, 0);
-
-    const incomeCents = flow.incomeCents;
-    const outflowCents = flow.spendingCents;
-    const rate = incomeCents === 0 ? null : (incomeCents - outflowCents + investmentCents) / incomeCents;
+    const { incomeCents, outflowCents, investmentCents, rate } = savingsRateFromFlow(flow, parseIdList(investmentGroupIds));
 
     res.status(200).json({ incomeCents, outflowCents, investmentCents, rate });
   } catch (err) {

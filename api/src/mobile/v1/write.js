@@ -319,4 +319,4 @@ async function moveBudget({ tokenId, month, from, to, amount }) {
   });
 }
 
-module.exports = { updateTransactionFields, splitTransactionLines, removeSplit, setBudgetedAmount, moveBudget };
+module.exports = { updateTransactionFields, splitTransactionLines, removeSplit, setBudgetedAmount, moveBudget, exclusive, syncNow, findCategory };

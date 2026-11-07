@@ -81,7 +81,7 @@ afterEach(() => {
 
 describe('the contract examples', () => {
   test('every example response validates, and drift is rejected', () => {
-    for (const name of ['me', 'accountsResponse', 'transactionsResponse', 'categoriesResponse', 'budgetMonthResponse', 'transactionDetailResponse', 'reportListResponse', 'budgetChangeResponse', 'reportsResponse', 'error']) {
+    for (const name of ['me', 'accountsResponse', 'transactionsResponse', 'categoriesResponse', 'budgetMonthResponse', 'transactionDetailResponse', 'reportListResponse', 'budgetChangeResponse', 'reportsResponse', 'reportsResponseCharts', 'error']) {
       expectValid(name, examples[name]);
     }
     expect(isValid('me', { ...examples.me, extra: 1 })).toBe(false);
