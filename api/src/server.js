@@ -19,11 +19,13 @@ const cashFlowRouter = require('./routes/cash-flow');
 const channelsRouter = require('./routes/channels');
 const summariesRouter = require('./routes/summaries');
 const mobileTokensRouter = require('./routes/mobile-tokens');
+const mobileHiddenAccountsRouter = require('./routes/mobile-hidden-accounts');
 const mobileSummaryRouter = require('./routes/mobile-summary');
 const mobileV1Router = require('./routes/mobile-v1');
 const forecastRouter = require('./routes/forecast');
 const { startScheduler } = require('./summary/scheduler');
 const { startForecastScheduler } = require('./forecast/scheduler');
+const { startBudgetSeriesScheduler } = require('./budget-series/scheduler');
 
 const app = express();
 
@@ -72,6 +74,7 @@ app.use('/api/cash-flow', cashFlowRouter);
 app.use('/api/channels', channelsRouter);
 app.use('/api/summaries', summariesRouter);
 app.use('/api/mobile/tokens', mobileTokensRouter);
+app.use('/api/mobile/hidden-accounts', mobileHiddenAccountsRouter);
 app.use('/api/forecast', forecastRouter);
 
 app.get('/health', (req, res) => {
@@ -92,6 +95,8 @@ if (require.main === module) {
     startScheduler({});
     // The daily low-balance check, same slot and catch-up rules.
     startForecastScheduler({});
+    // Keeps indefinite budget series filled 12 months ahead (03:30 and shortly after start).
+    startBudgetSeriesScheduler({});
   });
 }
 

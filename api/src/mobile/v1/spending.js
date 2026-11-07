@@ -9,6 +9,7 @@ const {
   breakdownByPayees,
   transactionsForCategoryAndPayee,
 } = require('../../spending-data');
+const { loadColorResolver } = require('./colors');
 const { ID_PATTERN, MAX_NAME, MAX_NOTE, clip, money } = require('./common');
 
 // GET /spending: the native drill-down behind a pacing row. It reuses the
@@ -41,9 +42,10 @@ async function rollupTitle(client, categoryIds) {
 }
 
 async function categoriesLevel(client, month, categoryIds) {
-  const [slices, title] = await Promise.all([
+  const [slices, title, colors] = await Promise.all([
     breakdownByCategoryIds(client, monthFilter(month), categoryIds),
     rollupTitle(client, categoryIds),
+    loadColorResolver(client),
   ]);
   const items = slices
     .filter((s) => ID_PATTERN.test(String(s.id)))
@@ -53,6 +55,7 @@ async function categoriesLevel(client, month, categoryIds) {
       label: clip(s.label),
       amount: money(s.amountCents),
       drill: { level: 'payees', categoryId: s.id },
+      ...colors.categoryField(s.id),
     }));
   return { title, total: sumOf(items), items, transactions: [] };
 }

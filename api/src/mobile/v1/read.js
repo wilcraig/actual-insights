@@ -1,5 +1,7 @@
 const { q } = require('@actual-app/api');
 
+const { loadColorResolver, createColorResolver } = require('./colors');
+const { readColors } = require('../../mobile-colors-store');
 const { DATE_PATTERN, ID_PATTERN, MAX_NOTE, badRequest, notFound, clip, isValidId, money, isHidden, isIncome } = require('./common');
 
 // The read side of /api/mobile/v1: pure builders from the Actual client to the
@@ -43,15 +45,34 @@ async function buildCurrency(client) {
   return { currency: await readCurrency(client) };
 }
 
+// Actual's sidebar order within one side (on or off budget): accounts that are
+// in no (live) group first, then each group in the group order, members in the
+// account order getAccounts() already returns (its sort_order).
+function sidebarOrder(accounts, groupIds) {
+  const live = new Set(groupIds);
+  const groupOf = (account) => (account.account_group_id != null && live.has(account.account_group_id) ? account.account_group_id : null);
+  return [null, ...groupIds].flatMap((id) => accounts.filter((account) => groupOf(account) === id));
+}
+
+async function readAccountGroups(client) {
+  // An Actual server without account groups simply has none.
+  if (typeof client.getAccountGroups !== 'function') return [];
+  try {
+    return ((await client.getAccountGroups()) || []).filter((group) => group && isValidId(group.id));
+  } catch {
+    return [];
+  }
+}
+
 async function buildAccounts(client, now = new Date()) {
-  const open = ((await client.getAccounts()) || [])
-    .filter((account) => !account.closed && isValidId(account.id))
-    // On-budget first, then off-budget, each by name; sorted before the cap so a
-    // long off-budget list can never push an on-budget account out.
-    .sort((a, b) => Boolean(a.offbudget) - Boolean(b.offbudget) || String(a.name).localeCompare(String(b.name)))
-    .slice(0, MAX_ACCOUNTS);
+  const groupList = await readAccountGroups(client);
+  const groupIds = groupList.map((group) => group.id);
+  const open = ((await client.getAccounts()) || []).filter((account) => !account.closed && isValidId(account.id));
+  // On-budget first, then off-budget, each in Actual's sidebar order; ordered
+  // before the cap so a long off-budget list can never push an on-budget account out.
+  const ordered = [...sidebarOrder(open.filter((a) => !a.offbudget), groupIds), ...sidebarOrder(open.filter((a) => a.offbudget), groupIds)].slice(0, MAX_ACCOUNTS);
   const accounts = await Promise.all(
-    open.map(async (account) => {
+    ordered.map(async (account) => {
       let balance = null;
       try {
         balance = await client.getAccountBalance(account.id);
@@ -59,15 +80,27 @@ async function buildAccounts(client, now = new Date()) {
       } catch {
         balance = null;
       }
-      return { id: account.id, name: clip(account.name), balance: balance === null ? null : money(balance), onBudget: !account.offbudget };
+      const groupId = groupIds.includes(account.account_group_id) ? account.account_group_id : null;
+      return { id: account.id, name: clip(account.name), balance: balance === null ? null : money(balance), onBudget: !account.offbudget, groupId };
     })
   );
-  return { schema: 1, generatedAt: now.toISOString(), accounts };
+  // Groups with at least one account shown, in Actual's order. A group's
+  // balance is the sum over its shown accounts (both sides), null if any is unknown.
+  const groups = groupList
+    .map((group) => {
+      const members = accounts.filter((account) => account.groupId === group.id);
+      if (members.length === 0) return null;
+      const balance = members.some((m) => m.balance === null) ? null : money(members.reduce((sum, m) => sum + m.balance, 0));
+      return { id: group.id, name: clip(group.name), balance };
+    })
+    .filter(Boolean)
+    .slice(0, 50);
+  return { schema: 1, generatedAt: now.toISOString(), accounts, groups };
 }
 
 // One AQL row -> the schema's transaction. Null when the row can't be shown
 // (a deleted row, or an id the schema would not accept).
-function mapTransaction(row) {
+function mapTransaction(row, colors) {
   if (!row || row.tombstone) return null;
   if (!isValidId(row.id) || !isValidId(row.account) || !DATE_PATTERN.test(String(row.date))) return null;
   const transfer = row.transfer_id != null;
@@ -89,6 +122,8 @@ function mapTransaction(row) {
     cleared: Boolean(row.cleared),
     transfer,
     split: Boolean(row.is_parent),
+    // A split parent has no category of its own, so no colour either.
+    color: category && !row.is_parent && colors ? colors.category(category.id) : null,
   };
 }
 
@@ -165,6 +200,7 @@ async function buildTransactions(client, params, now = new Date()) {
     pageFilters.push({ $or: [{ date: { $lt: after.date } }, { $and: [{ date: after.date }, { id: { $lt: after.id } }] }] });
   }
 
+  const colors = await loadColorResolver(client);
   const { data } = await client.aqlQuery(
     baseTransactionQuery()
       .filter({ $and: pageFilters })
@@ -176,7 +212,7 @@ async function buildTransactions(client, params, now = new Date()) {
 
   const rows = data || [];
   const hasMore = rows.length > limit;
-  const transactions = rows.slice(0, limit).map(mapTransaction).filter(Boolean);
+  const transactions = rows.slice(0, limit).map((row) => mapTransaction(row, colors)).filter(Boolean);
   // The cursor is the last row of the page as fetched (not of the rows that
   // could be shown), so an unshowable trailing row can't repeat or skip anything.
   const lastRow = rows[limit - 1];
@@ -203,7 +239,7 @@ const DETAIL_FIELDS = [...TX_FIELDS, 'imported_payee', 'imported_id', 'reconcile
 async function buildTransactionDetail(client, id) {
   const { data } = await client.aqlQuery(baseTransactionQuery().filter({ id }).select(DETAIL_FIELDS).limit(1));
   const row = data && data[0];
-  const base = mapTransaction(row);
+  const base = mapTransaction(row, await loadColorResolver(client));
   if (!base) return null;
 
   let splits = [];
@@ -253,7 +289,9 @@ async function readTransactionRow(client, id) {
 
 async function buildCategories(client, now = new Date()) {
   const groups = [];
-  for (const group of (await client.getCategoryGroups()) || []) {
+  const all = (await client.getCategoryGroups()) || [];
+  const colors = createColorResolver(all, await readColors());
+  for (const group of all) {
     if (group.hidden || !isValidId(group.id)) continue;
     groups.push({
       id: group.id,
@@ -261,13 +299,14 @@ async function buildCategories(client, now = new Date()) {
       isIncome: Boolean(group.is_income),
       categories: (group.categories || [])
         .filter((c) => !c.hidden && isValidId(c.id))
-        .map((c) => ({ id: c.id, name: clip(c.name) })),
+        .map((c) => ({ id: c.id, name: clip(c.name), color: colors.category(c.id) })),
+      color: colors.group(group.id),
     });
   }
   return { schema: 1, generatedAt: now.toISOString(), groups: groups.slice(0, 100) };
 }
 
-function budgetCategory(category) {
+function budgetCategory(category, colors) {
   return {
     id: category.id,
     name: clip(category.name),
@@ -275,6 +314,7 @@ function budgetCategory(category) {
     spent: money(category.spent),
     balance: money(category.balance),
     carryover: Boolean(category.carryover),
+    color: colors.category(category.id),
   };
 }
 
@@ -296,10 +336,11 @@ function budgetTotals(budgetMonth) {
 // categories shown, so the numbers on screen always add up.
 async function buildBudgetMonth(client, month, now = new Date()) {
   const budgetMonth = await client.getBudgetMonth(month);
+  const colors = await loadColorResolver(client);
   const groups = [];
   for (const group of (budgetMonth && budgetMonth.categoryGroups) || []) {
     if (isIncome(group) || isHidden(group) || !isValidId(group.id)) continue;
-    const categories = (group.categories || []).filter((c) => !isIncome(group, c) && !isHidden(group, c) && isValidId(c.id)).map(budgetCategory);
+    const categories = (group.categories || []).filter((c) => !isIncome(group, c) && !isHidden(group, c) && isValidId(c.id)).map((c) => budgetCategory(c, colors));
     if (categories.length === 0) continue;
     groups.push({
       id: group.id,
@@ -308,6 +349,7 @@ async function buildBudgetMonth(client, month, now = new Date()) {
       spent: money(categories.reduce((sum, c) => sum + c.spent, 0)),
       balance: money(categories.reduce((sum, c) => sum + c.balance, 0)),
       categories,
+      color: colors.group(group.id),
     });
   }
   return { schema: 1, generatedAt: now.toISOString(), month, totals: budgetTotals(budgetMonth || {}), groups: groups.slice(0, 100) };

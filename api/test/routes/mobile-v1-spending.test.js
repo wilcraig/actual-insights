@@ -119,8 +119,8 @@ describe('levels', () => {
       expectValid('spendingResponse', body);
       expect(body).toMatchObject({ month: '2026-11', level: 'categories', title: 'Selected categories', total: 8423 + 1000 + 1077 + 2800, transactions: [] });
       expect(body.items).toEqual(expect.arrayContaining([
-        { id: 'c-groc', label: 'Groceries', amount: 10500, drill: { level: 'payees', categoryId: 'c-groc' } },
-        { id: 'c-fuel', label: 'Fuel', amount: 2800, drill: { level: 'payees', categoryId: 'c-fuel' } },
+        { id: 'c-groc', label: 'Groceries', amount: 10500, drill: { level: 'payees', categoryId: 'c-groc' }, color: 'blue' },
+        { id: 'c-fuel', label: 'Fuel', amount: 2800, drill: { level: 'payees', categoryId: 'c-fuel' }, color: 'blue' },
       ]));
       expect(body.items).toHaveLength(2);
 
@@ -129,6 +129,23 @@ describe('levels', () => {
       expect(one.title).toBe('Usual Expenses');
       expect(one.month).toBe('2026-11');
     });
+  });
+
+  test('categories: items carry the category colour (explicit, else its group); payee items carry none', async () => {
+    fs.writeFileSync(path.join(DATA_DIR, 'mobile-colors.json'), JSON.stringify({ categories: { 'c-groc': 'pink' }, groups: { 'g-fun': 'red' } }));
+    try {
+      const { token } = await store.createToken('phone', DATA_DIR, { scope: 'read' });
+      await withServer(async (base) => {
+        const body = await (await get(base, token, '/spending?month=2026-11&level=categories&categoryIds=c-groc,c-fuel,c-eat')).json();
+        expectValid('spendingResponse', body);
+        expect(Object.fromEntries(body.items.map((i) => [i.id, i.color]))).toEqual({ 'c-groc': 'pink', 'c-fuel': 'blue' });
+        const payees = await (await get(base, token, '/spending?month=2026-11&level=payees&categoryId=c-groc')).json();
+        expectValid('spendingResponse', payees);
+        expect(payees.items.every((i) => !('color' in i))).toBe(true);
+      });
+    } finally {
+      fs.rmSync(path.join(DATA_DIR, 'mobile-colors.json'), { force: true });
+    }
   });
 
   test('payees: positive cents, the no-payee bucket is __none__, no inflow slices, title is the category', async () => {

@@ -1,11 +1,13 @@
 const express = require('express');
 
-const { getActualClient, syncIfDue } = require('../actual-client');
+const { syncIfDue } = require('../actual-client');
+const { scopedClient } = require('../mobile/v1/hidden');
 const { touchToken } = require('../mobile-tokens-store');
 const { bearerAuth, rateLimit, resetRateLimits, READ_LIMIT, WRITE_LIMIT } = require('../mobile/http');
 const { createReadCache } = require('../mobile/v1/cache');
 const { MONTH_PATTERN, ID_PATTERN, MAX_NOTE, MAX_MONEY, HttpError, badRequest, notFound, isValidId, monthWithinWindow } = require('../mobile/v1/common');
 const { MAX_LIMIT, DEFAULT_LIMIT, CURSOR_PATTERN, buildCurrency, buildAccounts, buildTransactions, buildCategories, buildBudgetMonth, buildTransactionDetail } = require('../mobile/v1/read');
+const { buildColors, putColor, isColorKey } = require('../mobile/v1/colors');
 const { buildSpending } = require('../mobile/v1/spending');
 const { updateTransactionFields, splitTransactionLines, removeSplit, setBudgetedAmount, moveBudget } = require('../mobile/v1/write');
 
@@ -80,7 +82,7 @@ function read(handler) {
     try {
       const { key, build, respond } = handler(req);
       const payload = await cache.get(key, async () => {
-        const client = await getActualClient();
+        const client = await scopedClient();
         await syncIfDue(client);
         return build(client);
       });
@@ -128,12 +130,24 @@ router.get('/transactions', readLimit, read((req) => {
     cursor,
   };
   const key = `transactions|${params.account ?? ''}|${params.uncategorized ? 1 : 0}|${params.group ?? ''}|${params.category ?? ''}|${params.limit}|${params.cursor ?? ''}`;
-  return { key, build: (client) => buildTransactions(client, params) };
+  return {
+    key,
+    build: (client) => {
+      // An account the owner hid does not exist as far as the app can tell.
+      if (params.account && client.hiddenIds && client.hiddenIds.has(params.account)) throw notFound();
+      return buildTransactions(client, params);
+    },
+  };
 }));
 
 router.get('/categories', readLimit, read((req) => {
   strictQuery(req, []);
   return { key: 'categories', build: (client) => buildCategories(client) };
+}));
+
+router.get('/colors', readLimit, read((req) => {
+  strictQuery(req, []);
+  return { key: 'colors', build: (client) => buildColors(client) };
 }));
 
 router.get('/budget/:month', readLimit, read((req) => {
@@ -310,12 +324,25 @@ router.put('/budget/:month/categories/:id', writeLimit, requireWrite, parseJson,
   return () => setBudgetedAmount({ tokenId: req.deviceToken.id, month, categoryId, budgeted });
 }));
 
+// Colours: {color: <colorKey>|null}, nothing else; null returns to the default.
+const putColorRoute = (kind) =>
+  write((req) => {
+    const id = pathId(req.params.id);
+    const { color } = strictBody(req, ['color']);
+    if (color !== null && !isColorKey(color)) throw badRequest();
+    return () => putColor({ tokenId: req.deviceToken.id, kind, id, color });
+  });
+router.put('/colors/groups/:id', writeLimit, requireWrite, parseJson, putColorRoute('groups'));
+router.put('/colors/categories/:id', writeLimit, requireWrite, parseJson, putColorRoute('categories'));
+
 router.post('/budget/:month/move', writeLimit, requireWrite, parseJson, write((req) => {
   const month = pathMonth(req);
   const { from, to, amount } = strictBody(req, ['from', 'to', 'amount']);
   if (!isValidId(from) || !isValidId(to) || from === to || !isCents(amount, 1, 1000000000000)) throw badRequest();
   return () => moveBudget({ tokenId: req.deviceToken.id, month, from, to, amount });
 }));
+
+require('./mobile-v1-budget-series')(router, { readLimit, writeLimit, requireWrite, parseJson, read, cache, fail, strictQuery, touchToken });
 
 // Anything else under /api/mobile/v1 (after auth): not found, never a
 // fall-through to the Actual-session guard.
@@ -341,3 +368,5 @@ function resetMobileV1State() {
 
 module.exports = router;
 module.exports.resetMobileV1State = resetMobileV1State;
+// The hidden-accounts setting changed: every cached read is out of date.
+module.exports.clearMobileV1Cache = () => cache.clear();

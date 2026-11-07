@@ -8,13 +8,19 @@ const examples = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'fixtures
 const ajv = new Ajv({ allErrors: true, strict: false, validateFormats: false });
 ajv.addSchema(schema);
 
+// An example key may carry a suffix naming a variant of one definition
+// (reportsResponseCharts is a reportsResponse holding every chart kind).
+const definitionFor = (name) => (schema.definitions[name] ? name : name.replace(/Charts$/, ''));
+
 function expectValid(definition, body) {
+  definition = definitionFor(definition);
   const validate = ajv.getSchema(`${schema.$id}#/definitions/${definition}`);
   if (!validate) throw new Error(`no definition ${definition}`);
   if (!validate(body)) throw new Error(`${definition} does not match the schema: ${JSON.stringify(validate.errors)}\n${JSON.stringify(body).slice(0, 500)}`);
 }
 
 function isValid(definition, body) {
+  definition = definitionFor(definition);
   return ajv.getSchema(`${schema.$id}#/definitions/${definition}`)(body);
 }
 
@@ -62,6 +68,8 @@ function makeFakeActual(overrides = {}) {
       { id: 't-09', date: '2026-11-07', account: 'a-sav', payee: null, category: null, amount: -300, notes: null, cleared: true },
       { id: 't-10', date: '2026-11-06', account: 'a-chk', payee: 'p-grocer', category: 'c-fuel', amount: -1200, notes: null, cleared: true },
     ],
+    // Actual's account groups, in its order ({ id, name }); an account joins one with account_group_id.
+    accountGroups: [],
     currency: 'USD',
     calls: [],
     syncs: 0,
@@ -95,6 +103,7 @@ function makeFakeActual(overrides = {}) {
     const actual = value(row, k);
     if (v !== null && typeof v === 'object') {
       if ('$lt' in v) return actual < v.$lt;
+      if ('$ne' in v) return actual !== v.$ne;
       throw new Error('fake AQL: unsupported operator');
     }
     return actual === v;
@@ -109,6 +118,7 @@ function makeFakeActual(overrides = {}) {
     state,
     sync: jest.fn(async () => { state.syncs += 1; }),
     getAccounts: jest.fn(async () => state.accounts.map(({ balance, ...a }) => a)),
+    getAccountGroups: jest.fn(async () => state.accountGroups),
     getAccountBalance: jest.fn(async (id) => acct(id).balance),
     getCategoryGroups: jest.fn(async () => state.groups),
     getBudgetMonth: jest.fn(async (month) => {

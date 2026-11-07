@@ -1,6 +1,7 @@
 const express = require('express');
 
-const { getActualClient, syncIfDue } = require('../actual-client');
+const { syncIfDue } = require('../actual-client');
+const { scopedClient } = require('../mobile/v1/hidden');
 const { buildMobileSummary } = require('../mobile/summary');
 const { touchToken } = require('../mobile-tokens-store');
 const { bearerAuth, rateLimit, resetRateLimits, READ_LIMIT } = require('../mobile/http');
@@ -36,7 +37,7 @@ async function currentPayload() {
   if (cached && cached.expiresAt > now) return cached.payload;
   if (!building) {
     building = (async () => {
-      const client = await getActualClient();
+      const client = await scopedClient();
       await syncIfDue(client);
       const payload = await buildMobileSummary({ client, now: new Date() });
       cached = { payload, expiresAt: Date.now() + CACHE_TTL_MS };
@@ -73,3 +74,8 @@ function resetMobileSummaryState() {
 
 module.exports = router;
 module.exports.resetMobileSummaryState = resetMobileSummaryState;
+// The hidden-accounts setting changed: forget the cached payload.
+module.exports.clearMobileSummaryCache = () => {
+  cached = null;
+  building = null;
+};

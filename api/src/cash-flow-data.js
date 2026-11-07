@@ -93,4 +93,13 @@ async function loadMonthCashFlow(client, month) {
   };
 }
 
-module.exports = { loadMonthCashFlow, isIncomeGroup, isTransferGroup };
+// The savings rate: (income - spending + investment) / income, or null with no
+// income. Shared by /api/savings-rate (the web gauge) and the native reports.
+function savingsRateFromFlow(flow, investmentGroupIds) {
+  const investmentIds = new Set(investmentGroupIds || []);
+  const investmentCents = flow.groups.filter((group) => investmentIds.has(group.id)).reduce((sum, group) => sum + group.amountCents, 0);
+  const rate = flow.incomeCents === 0 ? null : (flow.incomeCents - flow.spendingCents + investmentCents) / flow.incomeCents;
+  return { incomeCents: flow.incomeCents, outflowCents: flow.spendingCents, investmentCents, rate };
+}
+
+module.exports = { loadMonthCashFlow, isIncomeGroup, isTransferGroup, savingsRateFromFlow };

@@ -53,3 +53,18 @@ export function createToken(label, scope = 'read') {
 export function revokeToken(id) {
   return call(`/api/mobile/tokens/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
+
+// -> { accounts: [{ id, name, closed, offBudget, hidden }] }: every account,
+// closed and off-budget ones too, by name.
+export function listHiddenAccounts() {
+  return call('/api/mobile/hidden-accounts');
+}
+
+// Replaces the list of accounts hidden from the phone app. -> the same shape as above.
+export function saveHiddenAccounts(hiddenIds) {
+  return call('/api/mobile/hidden-accounts', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ hiddenIds }),
+  });
+}
