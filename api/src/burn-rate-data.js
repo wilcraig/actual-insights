@@ -118,7 +118,8 @@ function sumBudgetedCents(categoryGroups) {
 // The month's cumulative spend by day (through today for the current month)
 // and the month's budgeted total. Shared by /api/burn-rate and the native
 // reports so the web chart and the phone show the same numbers.
-async function loadBurnRate(client, month, now = new Date()) {
+// `exclude` (optional) is an extra AQL clause leaving some rows out of the spend.
+async function loadBurnRate(client, month, now = new Date(), { exclude } = {}) {
   const budgetMonth = await client.getBudgetMonth(month);
   const budgetedCents = sumBudgetedCents(budgetMonth.categoryGroups);
 
@@ -136,12 +137,14 @@ async function loadBurnRate(client, month, now = new Date()) {
   } else {
     const queryEndStr = month === currentMonthStr ? todayStr : monthEnd;
     const rangeEnd = month === currentMonthStr ? today : parseDateOnly(monthEnd);
-    const baseFilter = {
+    const plainFilter = {
       ...dateRange(monthStart, queryEndStr),
       tombstone: false,
       transfer_id: null,
       'category.group.is_income': false,
     };
+    // dateRange() already uses $and, so the exclusion goes in a new one.
+    const baseFilter = exclude ? { $and: [plainFilter, exclude] } : plainFilter;
     const { data: rows } = await client.aqlQuery(
       q('transactions')
         .filter(baseFilter)

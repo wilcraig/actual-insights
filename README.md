@@ -586,6 +586,32 @@ recovered, only replaced.
   doesn't have the mobile summary" (an older Actual Insights, or a login
   page in front of it, answers without the header).
 
+### Excluded and hidden transactions, new categories
+
+A `write` token can flag a transaction with `PATCH /api/mobile/v1/transactions/<id>`
+(`{"excluded": true}` and/or `{"hidden": true}`). These are Insights flags,
+stored by transaction id in `mobile-transaction-flags.json` in the data
+directory (at most 20000 entries, nothing pruned automatically, a missing or
+damaged file flags nothing); nothing is written to Actual, and a flag-only
+PATCH makes no Actual call. `hidden` implies `excluded`; `hidden: false` leaves
+`excluded` as it was; `excluded: false` on a hidden transaction is a 400.
+
+- **Excluded** transactions are left out of category and spending figures the
+  phone app and its report cards show: Budget Config spent and balance (the
+  amounts are added back for that month; carryover from earlier months is not
+  recalculated), pacing bars and the month summary, spending drill-downs,
+  breakdown donut/treemap/Sankey, the spending card, the spending calendar,
+  burn rate and custom reports (except reports grouped by account). They do
+  **not** change account balances, net worth, cash flow, account history or
+  Actual's own budget screen.
+- **Hidden** transactions also disappear from `GET /transactions` (unless
+  `showHidden=1`) and from the counts; they are still addressable by id.
+- The **uncategorized** view and `uncategorizedCount` skip excluded (and so
+  hidden) transactions: an excluded transaction never needs a category.
+- `POST /api/mobile/v1/category-groups` and `POST /api/mobile/v1/categories`
+  create an expense group or a category (optionally with a budgeted amount for
+  the current month); a duplicate name (any case) is `409 conflict`.
+
 ### Hiding accounts from the phone app
 
 On the Insights page, Mobile app tab, "Hidden accounts" lists every account

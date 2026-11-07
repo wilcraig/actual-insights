@@ -6,15 +6,22 @@
   // API's own default when its `accounts` query param is omitted.
   // labelContent controls what the combined view's in-band label shows:
   // 'both' (the default, amount then name), 'amount', or 'name'.
-  let { accountIds = [], labelContent = 'both' } = $props();
+  // chart ('stacked' | 'lines') and range ('1M' | '3M' | '6M' | '1Y' | 'ALL')
+  // are the initial selection from the widget's config; the buttons still
+  // change them.
+  let { accountIds = [], labelContent = 'both', chart = 'stacked', range: initialRange = '1M' } = $props();
 
-  let range = $state('1M');
+  const normalizeRange = (r) => {
+    const upper = String(r).toUpperCase();
+    return upper === 'ALL' ? 'all' : ['1M', '3M', '6M', '1Y'].includes(upper) ? upper : '1M';
+  };
+  let range = $state(normalizeRange(initialRange));
   // "Combined" (the default) draws every account as its own stacked-area
   // band, each labeled with its own name and current balance (never a
   // shared/flattened scale, since each band's label is just that
   // account's own figure, not a y-axis reading) -- "Separate" is kept for
   // anyone who prefers one small area chart per account instead.
-  let view = $state('combined');
+  let view = $state(chart === 'lines' ? 'lines' : 'combined');
   let data = $state(null);
   let errorMessage = $state(null);
 
@@ -29,6 +36,7 @@
   const VIEWS = [
     { value: 'separate', label: 'Separate' },
     { value: 'combined', label: 'Combined' },
+    { value: 'lines', label: 'Lines' },
   ];
 
   // Reads this account's color from the same categorical chart palette
@@ -382,6 +390,26 @@
       .y((p) => y(p.balanceCents))(points);
   }
 
+  // Lines view: one line per account on a shared scale.
+  let linesYScale = $derived.by(() => {
+    if (!data || isEmpty || !xScale) return null;
+    let [min, max] = d3Extent(data.accounts.flatMap((a) => a.points.map((p) => p.balanceCents)));
+    if (min === undefined) return null;
+    if (min === max) {
+      const pad = Math.max(Math.abs(max) * 0.1, 100);
+      min -= pad;
+      max += pad;
+    }
+    return scaleLinear().domain([min, max]).nice().range([HEIGHT - MARGIN.bottom, MARGIN.top]);
+  });
+
+  function accountLinePath(points) {
+    if (!xScale || !linesYScale || points.length < 2) return null;
+    return d3Line()
+      .x((p) => xScale(parseDateOnly(p.date)))
+      .y((p) => linesYScale(p.balanceCents))(points);
+  }
+
   function latestBalance(points) {
     return points.length > 0 ? points[points.length - 1].balanceCents : 0;
   }
@@ -455,6 +483,28 @@
         </div>
       {/each}
     </div>
+  {:else if view === 'lines'}
+    <svg
+      class="balances-svg balances-lines-svg"
+      viewBox="0 0 {WIDTH} {HEIGHT}"
+      role="img"
+      aria-label="Account balances over time, lines"
+    >
+      {#each data.accounts as account, index (account.id)}
+        <path class="balances-line" d={accountLinePath(account.points)} stroke={colorFor(index)} stroke-width="2" fill="none" />
+      {/each}
+      {#each xTicks as tick (tick.getTime())}
+        <text class="balances-axis-label balances-axis-label--x" x={xScale(tick)} y={HEIGHT - MARGIN.bottom + 16}>
+          {formatTick(tick)}
+        </text>
+      {/each}
+    </svg>
+    <ul class="balances-legend">
+      {#each data.accounts as account, index (account.id)}
+        <li><span class="balances-swatch" style:background={colorFor(index)}></span>{account.name} {formatCents(latestBalance(account.points))}</li>
+      {/each}
+    </ul>
+    <p class="balances-combined-total">Total: {formatCents(combinedTotal)}</p>
   {:else}
     <svg
       class="balances-svg"
@@ -671,6 +721,24 @@
   .balances-area-label {
     font-size: 17px;
     font-weight: 700;
+  }
+
+  .balances-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    font-size: 0.85rem;
+  }
+
+  .balances-swatch {
+    display: inline-block;
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 50%;
+    margin-right: 0.35rem;
   }
 
   .balances-combined-total {

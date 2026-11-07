@@ -8,6 +8,7 @@ const { readGoals } = require('../goals-store');
 const { computeMonthEndProjection } = require('../month-end-data');
 const { assertTimezoneConfigured, computeDays } = require('../month-days');
 const { statusFor } = require('../summary/sections/pacing-lines');
+const { loadExclusions, adjustBudgetMonth } = require('./v1/exclusions');
 
 // The payload behind GET /api/mobile/summary (schema 1, published as
 // docs/mobile-summary.schema.json). Every number here is computed by the same
@@ -186,7 +187,8 @@ async function buildMobileSummary({ client, now = new Date(), dataDir } = {}) {
 
   const [currency, monthPart, projection, accounts, upcoming, forecast, goals] = await Promise.all([
     section('currency', 'USD', () => readCurrency(client)),
-    section('month', null, async () => monthSection(await budgetMonthPromise, month)),
+    // Excluded and hidden transactions are added back to the month's spent/remaining (goals keep Actual's balances).
+    section('month', null, async () => monthSection(adjustBudgetMonth(await budgetMonthPromise, await loadExclusions(client), month), month)),
     section('projection', null, async () => ({ monthEndNet: (await computeMonthEndProjection(client, month)).projectedNetCents })),
     section('accounts', [], () => accountsSection(client)),
     section('upcoming', [], () => upcomingSection(client, now)),

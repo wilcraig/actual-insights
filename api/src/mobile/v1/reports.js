@@ -3,6 +3,7 @@ const { q } = require('@actual-app/api');
 const { isIncomeGroup, isTransferGroup, loadMonthCashFlow } = require('../../cash-flow-data');
 const { parsePlaceholder, insightsBuilder, groupDrills } = require('./reports-insights');
 const { notFound } = require('./common');
+const { loadExclusions, notInClause, adjustBudgetMonth } = require('./exclusions');
 const { isColorKey, createColorResolver } = require('./colors');
 const { readColors } = require('../../mobile-colors-store');
 const { Unsupported, conditionsFilter, txFilter, dailySums, bucketSums, sumsBy, sumsByDateAnd } = require('./reports-query');
@@ -183,7 +184,7 @@ async function spendingCard(ctx, meta) {
   const month = ctx.month;
   if (mode === 'average') {
     const months = [-3, -2, -1].map((n) => monthKey(addMonths(ctx.now, n)));
-    const flows = await Promise.all(months.map((m) => loadMonthCashFlow(ctx.client, m)));
+    const flows = await Promise.all(months.map(async (m) => loadMonthCashFlow(ctx.client, m, { exclude: await ctx.excludeMonth(m) })));
     const totals = new Map();
     for (const flow of flows) {
       for (const c of flattenCategories(flow)) {
@@ -204,7 +205,7 @@ async function spendingCard(ctx, meta) {
     }
     return { kind: 'breakdown', chart: 'donut', format: 'money', ...capItems(items), subtitle: `Spent this month, ${month}` };
   }
-  const flow = await loadMonthCashFlow(ctx.client, month);
+  const flow = await loadMonthCashFlow(ctx.client, month, { exclude: await ctx.excludeMonth(month) });
   return { kind: 'breakdown', chart: 'donut', format: 'money', ...capItems(flattenCategories(flow).map((c) => ({ label: c.label, value: c.value, ...categoryDrill(c.id), ...colors.categoryField(c.id) }))), subtitle: month };
 }
 
@@ -363,7 +364,9 @@ async function customReportCard(ctx, meta) {
   const groupBy = report.group_by || 'Category';
   const graph = report.graph_type;
   const range = await resolveReportRange(report, ctx.now, { earliest: ctx.earliest });
-  const baseExtra = [conditionsFilter(conditions, report.conditions_op), report.show_offbudget ? null : { 'account.offbudget': false }];
+  // A report by account is about real money; every other one leaves excluded and hidden transactions out.
+  const exclude = groupBy === 'Account' ? null : await ctx.excludeClause(range.start, range.end);
+  const baseExtra = [conditionsFilter(conditions, report.conditions_op), report.show_offbudget ? null : { 'account.offbudget': false }, exclude];
   const filter = txFilter({ start: range.start, end: range.end, extra: [...baseExtra, balanceFilter(balanceType)], transfers: false });
   const title = report.name || meta.name || 'Report';
   const subtitle = `${range.start} to ${range.end}`;
@@ -453,11 +456,18 @@ function makeContext(client, now) {
     return memo.get(key);
   };
   const month = monthKey(now);
+  const exclusions = () => once('exclusions', () => loadExclusions(client));
   return {
     client,
     now,
     month,
-    budgetMonth: () => once('budgetMonth', () => client.getBudgetMonth(month)),
+    // Excluded and hidden transactions are added back to spent/balance, so every
+    // pacing and spending view built on this reads the adjusted figures.
+    budgetMonth: () => once('budgetMonth', async () => adjustBudgetMonth(await client.getBudgetMonth(month), await exclusions(), month)),
+    // An AQL clause leaving out the excluded/hidden transactions dated in
+    // [start, end] (or one 'YYYY-MM'), null when there are none.
+    excludeClause: async (start, end) => notInClause((await exclusions()).idsBetween(start, end)),
+    excludeMonth: async (m) => notInClause((await exclusions()).idsBetween(`${m}-01`, `${m}-31`)),
     accounts: () => once('accounts', async () => (await client.getAccounts()) || []),
     payees: () => once('payees', async () => (await client.getPayees()) || []),
     colors: () => once('colors', async () => createColorResolver((await client.getCategoryGroups()) || [], await readColors())),

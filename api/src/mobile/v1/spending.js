@@ -10,6 +10,7 @@ const {
   transactionsForCategoryAndPayee,
 } = require('../../spending-data');
 const { loadColorResolver } = require('./colors');
+const { loadExclusions, withoutExcluded } = require('./exclusions');
 const { ID_PATTERN, MAX_NAME, MAX_NOTE, clip, money } = require('./common');
 
 // GET /spending: the native drill-down behind a pacing row. It reuses the
@@ -24,9 +25,10 @@ const PAYEE_ID_PATTERN = /^([A-Za-z0-9_-]{1,64}|__none__)$/;
 
 const sumOf = (rows) => rows.reduce((total, row) => total + row.amount, 0);
 
-function monthFilter(month) {
+// The month's spending rows, minus excluded and hidden transactions.
+function monthFilter(month, exclusions) {
   const { monthStart, monthEnd } = monthBounds(month);
-  return baseFilterFor(dateRange(monthStart, monthEnd));
+  return withoutExcluded(baseFilterFor(dateRange(monthStart, monthEnd)), exclusions, monthStart, monthEnd);
 }
 
 // A generic title for a rollup: the group's name when every category is in
@@ -41,9 +43,9 @@ async function rollupTitle(client, categoryIds) {
   return 'Selected categories';
 }
 
-async function categoriesLevel(client, month, categoryIds) {
+async function categoriesLevel(client, month, categoryIds, exclusions) {
   const [slices, title, colors] = await Promise.all([
-    breakdownByCategoryIds(client, monthFilter(month), categoryIds),
+    breakdownByCategoryIds(client, monthFilter(month, exclusions), categoryIds),
     rollupTitle(client, categoryIds),
     loadColorResolver(client),
   ]);
@@ -66,9 +68,9 @@ async function categoryName(client, categoryId) {
   return category && category.name ? clip(category.name) : 'Category';
 }
 
-async function payeesLevel(client, month, categoryId) {
+async function payeesLevel(client, month, categoryId, exclusions) {
   const [slices, title] = await Promise.all([
-    breakdownByPayees(client, monthFilter(month), categoryId),
+    breakdownByPayees(client, monthFilter(month, exclusions), categoryId),
     categoryName(client, categoryId),
   ]);
   const items = slices
@@ -84,10 +86,10 @@ async function payeesLevel(client, month, categoryId) {
   return { title, total: sumOf(items), items, transactions: [] };
 }
 
-async function transactionsLevel(client, month, categoryId, payeeId) {
+async function transactionsLevel(client, month, categoryId, payeeId, exclusions) {
   const none = payeeId === NO_PAYEE_ID;
   const [rows, payees] = await Promise.all([
-    transactionsForCategoryAndPayee(client, monthFilter(month), categoryId, none ? null : payeeId),
+    transactionsForCategoryAndPayee(client, monthFilter(month, exclusions), categoryId, none ? null : payeeId),
     none ? Promise.resolve(null) : client.aqlQuery(q('payees').select('*')).then((r) => r.data),
   ]);
   const payeeName = none ? null : (() => {
@@ -110,9 +112,10 @@ async function transactionsLevel(client, month, categoryId, payeeId) {
 // `scope`: { level, categoryIds | categoryId | categoryId + payeeId }, already validated.
 async function buildSpending(client, month, scope, now = new Date()) {
   let body;
-  if (scope.level === 'categories') body = await categoriesLevel(client, month, scope.categoryIds);
-  else if (scope.level === 'payees') body = await payeesLevel(client, month, scope.categoryId);
-  else body = await transactionsLevel(client, month, scope.categoryId, scope.payeeId);
+  const exclusions = await loadExclusions(client);
+  if (scope.level === 'categories') body = await categoriesLevel(client, month, scope.categoryIds, exclusions);
+  else if (scope.level === 'payees') body = await payeesLevel(client, month, scope.categoryId, exclusions);
+  else body = await transactionsLevel(client, month, scope.categoryId, scope.payeeId, exclusions);
   return {
     schema: 1,
     generatedAt: now.toISOString(),

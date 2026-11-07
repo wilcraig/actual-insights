@@ -224,7 +224,7 @@ async function groupDrills(ctx) {
 // to the month's budget on the last day ("Even pace"). Labels are the days of
 // the month. Numbers come from loadBurnRate, the code behind /api/burn-rate.
 async function burnRate(ctx) {
-  const data = await loadBurnRate(ctx.client, ctx.month, ctx.now);
+  const data = await loadBurnRate(ctx.client, ctx.month, ctx.now, { exclude: await ctx.excludeMonth(ctx.month) });
   const { monthEnd } = monthBounds(ctx.month);
   const lastDay = Number(monthEnd.slice(8, 10));
   const labels = [];
@@ -280,7 +280,10 @@ async function savingsRate(ctx, config) {
 async function spendingDonut(ctx, config) {
   const { monthStart, monthEnd } = monthBounds(ctx.month);
   const [slices, drills, colors] = await Promise.all([
-    breakdownByGroups(ctx.client, baseFilterFor(dateRange(monthStart, monthEnd)), asIdList(config)),
+    ctx.excludeClause(monthStart, monthEnd).then((exclude) => {
+      const base = baseFilterFor(dateRange(monthStart, monthEnd));
+      return breakdownByGroups(ctx.client, exclude ? { $and: [base, exclude] } : base, asIdList(config));
+    }),
     groupDrills(ctx),
     ctx.colors(),
   ]);
@@ -290,24 +293,62 @@ async function spendingDonut(ctx, config) {
   return { kind: 'breakdown', chart: 'donut', format: 'money', items, subtitle: ctx.month };
 }
 
-// The web chart's default view: the last month (1M) of daily balances, one
-// band per open account, combined (stacked). accountIds as in the placeholder.
-// Beyond 12 accounts the contract's series cap folds the smallest into one.
+const BALANCE_RANGES = { '1M': '1M', '3M': '3M', '6M': '6M', '1Y': '1Y', ALL: 'all' };
+const MAX_BALANCE_POINTS = 400;
+
+// The object form of the placeholder: `chart` ('stacked' | 'lines') and
+// `range` ('1M' | '3M' | '6M' | '1Y' | 'ALL'); the bare array and an object
+// without them keep the original stacked 1M view.
+function parseBalancesConfig(config) {
+  const object = config && typeof config === 'object' && !Array.isArray(config);
+  const ids = Array.isArray(config) ? asIdList(config) : asIdList(object && config.accountIds);
+  const range = object && typeof config.range === 'string' && Object.prototype.hasOwnProperty.call(BALANCE_RANGES, config.range.toUpperCase()) ? config.range.toUpperCase() : '1M';
+  return { ids, lines: Boolean(object && config.chart === 'lines'), range };
+}
+
+// Which of the daily points to keep: every day for 1M and 3M, every 7th day
+// (counted back from today, so today is always in) for 6M and 1Y, the last day
+// of each month for ALL (plus the first day and today). Never more than 400.
+function sampleIndexes(dates, range) {
+  const last = dates.length - 1;
+  if (last < 0) return [];
+  let keep = [];
+  if (range === '1M' || range === '3M') keep = dates.map((_, i) => i);
+  else if (range === '6M' || range === '1Y') for (let i = last; i >= 0; i -= 7) keep.unshift(i);
+  else {
+    keep.push(0);
+    for (let i = 1; i < last; i += 1) if (dates[i].slice(0, 7) !== dates[i + 1].slice(0, 7)) keep.push(i);
+    if (last > 0) keep.push(last);
+  }
+  if (keep.length > MAX_BALANCE_POINTS) {
+    const step = Math.ceil(keep.length / MAX_BALANCE_POINTS);
+    const thinned = [];
+    for (let i = keep.length - 1; i >= 0; i -= step) thinned.unshift(keep[i]);
+    keep = thinned;
+  }
+  return keep;
+}
+
+// The web chart: one band per open account, combined (stacked) or lines, over
+// the configured range (default the last month, daily). accountIds as in the
+// placeholder. Beyond 12 accounts the contract's series cap folds the
+// smallest into one.
 async function accountBalances(ctx, config) {
-  const ids = Array.isArray(config) ? asIdList(config) : asIdList(config && config.accountIds);
-  const data = await loadAccountBalances(ctx.client, '1M', ids, ctx.now);
-  const labels = data.netWorth.map((p) => p.date);
-  let series = data.accounts.map((a) => ({ name: a.name, values: a.points.map((p) => p.balanceCents), total: a.points.length ? a.points[a.points.length - 1].balanceCents : 0 }));
+  const { ids, lines, range } = parseBalancesConfig(config);
+  const data = await loadAccountBalances(ctx.client, BALANCE_RANGES[range], ids, ctx.now);
+  const keep = sampleIndexes(data.netWorth.map((p) => p.date), range);
+  const labels = keep.map((i) => data.netWorth[i].date);
+  let series = data.accounts.map((a) => ({ name: a.name, values: keep.map((i) => a.points[i].balanceCents), total: a.points.length ? a.points[a.points.length - 1].balanceCents : 0 }));
   if (series.length > 12) {
     const ranked = [...series].sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
-    const keep = new Set(ranked.slice(0, 11));
-    const rest = series.filter((x) => !keep.has(x));
-    series = series.filter((x) => keep.has(x));
+    const kept = new Set(ranked.slice(0, 11));
+    const rest = series.filter((x) => !kept.has(x));
+    series = series.filter((x) => kept.has(x));
     series.push({ name: 'Other accounts', values: labels.map((_, i) => rest.reduce((sum, x) => sum + x.values[i], 0)) });
   }
   return {
     kind: 'multiseries',
-    chart: 'stackedArea',
+    chart: lines ? 'line' : 'stackedArea',
     format: 'money',
     labels,
     series: series.map(({ name, values }) => ({ name, values })),
@@ -315,9 +356,37 @@ async function accountBalances(ctx, config) {
   };
 }
 
+// The web list widget: current balance of the picked accounts (every open
+// account when none is picked), one row each in the picked order, then a
+// Total row when showTotal. The client is the scoped one, so hidden accounts
+// are not there to be listed or counted.
+async function accountBalanceList(ctx, config) {
+  const object = config && typeof config === 'object' && !Array.isArray(config);
+  const ids = Array.isArray(config) ? asIdList(config) : asIdList(object && config.accountIds);
+  const showTotal = Boolean(object && config.showTotal === true);
+  const open = ((await ctx.accounts()) || []).filter((a) => !a.closed);
+  const byId = new Map(open.map((a) => [a.id, a]));
+  const picked = ids.length > 0 ? [...new Set(ids)].map((id) => byId.get(id)).filter(Boolean) : open;
+  const shown = picked.slice(0, showTotal ? 59 : 60);
+  const rows = await Promise.all(
+    shown.map(async (a) => {
+      let balance = 0;
+      try {
+        const value = await ctx.client.getAccountBalance(a.id);
+        if (Number.isInteger(value)) balance = value;
+      } catch {
+        balance = 0;
+      }
+      return { title: a.name, subtitle: a.offbudget ? 'Off budget' : 'On budget', value: balance };
+    })
+  );
+  if (showTotal) rows.push({ title: 'Total', value: rows.reduce((sum, r) => sum + r.value, 0) });
+  return { kind: 'list', rows };
+}
+
 // The same numbers as SpendingSankey: this month's cash flow.
 async function spendingSankey(ctx) {
-  const flow = await loadMonthCashFlow(ctx.client, ctx.month);
+  const flow = await loadMonthCashFlow(ctx.client, ctx.month, { exclude: await ctx.excludeMonth(ctx.month) });
   return { kind: 'sankey', format: 'money', ...buildSankey(flow), subtitle: ctx.month };
 }
 
@@ -392,7 +461,8 @@ async function spendingHeatmap(ctx, config) {
   const today = startOfDay(ctx.now);
   const start = fmt(addDays(today, -(days - 1)));
   const end = fmt(today);
-  const base = [{ 'category.group.is_income': false }];
+  // Excluded and hidden transactions are not spending.
+  const base = [{ 'category.group.is_income': false }, await ctx.excludeClause(start, end)];
   const filter = txFilter({ start, end, extra: base, transfers: false });
   const groups = (await ctx.categoryGroups()).filter((g) => !g.is_income && (isTransferGroup(g) || isIncomeGroup(g)));
   const [all, removed] = await Promise.all([
@@ -426,6 +496,7 @@ const BUILDERS = {
   'paycheck-alerts': { title: 'Paycheck alerts', build: paycheckAlerts },
   'unlinked-transfers': { title: 'Unlinked transfers', build: unlinkedTransfers },
   'account-balances': { title: 'Account balances', build: accountBalances },
+  'account-balance-list': { title: 'Account balances', build: accountBalanceList },
   'spending-heatmap': { title: 'Spending calendar', build: spendingHeatmap },
 };
 

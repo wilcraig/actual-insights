@@ -611,3 +611,35 @@ test("a goal target far above the current stacked total still has its corridor e
   // top edge -- clipped off-canvas by the root <svg>.
   expect(y2).toBeGreaterThanOrEqual(16);
 });
+
+test('range config sets the initial range (ALL maps to the API\'s "all")', async () => {
+  fetchApi.mockResolvedValue(jsonResponse(multiDayPayload()));
+  mountChart({ range: 'ALL' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(balanceCallsOnly()[0][0]).toContain('range=all');
+
+  fetchApi.mockClear();
+  mountChart({ range: '6M' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(balanceCallsOnly()[0][0]).toContain('range=6M');
+});
+
+test('chart="lines" starts in the lines view: one line per account, no stacked bands', async () => {
+  fetchApi.mockResolvedValue(jsonResponse(multiDayPayload()));
+  const target = mountChart({ chart: 'lines' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(target.querySelectorAll('path.balances-line')).toHaveLength(2);
+  expect(target.querySelectorAll('path.balances-area')).toHaveLength(0);
+});
+
+test('the default chart is the stacked combined view', async () => {
+  fetchApi.mockResolvedValue(jsonResponse(multiDayPayload()));
+  const target = mountChart();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(target.querySelectorAll('path.balances-area')).toHaveLength(2);
+  expect(target.querySelectorAll('path.balances-line')).toHaveLength(0);
+});

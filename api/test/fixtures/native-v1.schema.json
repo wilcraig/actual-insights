@@ -91,7 +91,9 @@
         "name",
         "balance",
         "onBudget",
-        "groupId"
+        "groupId",
+        "investment",
+        "trend"
       ],
       "properties": {
         "id": {
@@ -123,6 +125,21 @@
             }
           ],
           "description": "The account group (as set up in Actual's sidebar) this account belongs to, or null."
+        },
+        "investment": {
+          "type": "boolean",
+          "description": "The user marked this as an investment account (stored by Actual Insights; Actual has no such type)."
+        },
+        "trend": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/accountTrend"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Balance change over the last 30 days; only for investment accounts (null otherwise). flat when the change is within 0.5% of the starting balance."
         }
       }
     },
@@ -216,7 +233,9 @@
         "cleared",
         "transfer",
         "split",
-        "color"
+        "color",
+        "excluded",
+        "hidden"
       ],
       "properties": {
         "id": {
@@ -296,11 +315,19 @@
             }
           ],
           "description": "Effective colour of the transaction's category (explicit category colour, else its group's); null when uncategorized."
+        },
+        "excluded": {
+          "type": "boolean",
+          "description": "Left out of budget and spending figures in Chipmunk and Insights (not in Actual's own budget screen). Always true when hidden."
+        },
+        "hidden": {
+          "type": "boolean",
+          "description": "Hidden from transaction lists unless showHidden=1; implies excluded."
         }
       }
     },
     "transactionsResponse": {
-      "description": "GET /transactions?account=<id>&group=<id>&category=<id>&uncategorized=1&limit=<1..100, default 50>&cursor=<opaque>. Newest first. account omitted = all accounts. group (a category group id) and category (a category id) filter by where the money went; at most one of uncategorized, group, category may be given (else 400). uncategorized=1 keeps only rows with no category that are not transfers and not split parents; off-budget accounts are never in the uncategorized view. uncategorizedCount is present on the first page only (same account filter).",
+      "description": "GET /transactions?account=<id>&group=<id>&category=<id>&uncategorized=1&limit=<1..100, default 50>&cursor=<opaque>. Newest first. account omitted = all accounts. group (a category group id) and category (a category id) filter by where the money went; at most one of uncategorized, group, category may be given (else 400). uncategorized=1 keeps only rows with no category that are not transfers and not split parents; off-budget accounts are never in the uncategorized view. uncategorizedCount is present on the first page only (same account filter). showHidden=1 includes hidden transactions (default excludes them and their counts); excluded transactions always appear, marked.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -546,7 +573,7 @@
       }
     },
     "transactionUpdateRequest": {
-      "description": "PATCH /transactions/<id> (write scope). Any of category (id or null to clear; not allowed on transfers or split parents), notes (string up to 500, or null to clear), cleared (boolean). At least one key.",
+      "description": "PATCH /transactions/<id> (write scope). Any of category (id or null to clear; not allowed on transfers or split parents), notes (string up to 500, or null to clear), cleared (boolean). At least one key. excluded and hidden are Insights flags (not Actual fields): hidden true implies excluded true; hidden false leaves excluded as it was; excluded false on a hidden transaction is 400.",
       "type": "object",
       "additionalProperties": false,
       "minProperties": 1,
@@ -572,6 +599,12 @@
           ]
         },
         "cleared": {
+          "type": "boolean"
+        },
+        "excluded": {
+          "type": "boolean"
+        },
+        "hidden": {
           "type": "boolean"
         }
       }
@@ -1662,7 +1695,9 @@
         "tags",
         "splits",
         "transferAccountName",
-        "color"
+        "color",
+        "excluded",
+        "hidden"
       ],
       "properties": {
         "id": {
@@ -1835,6 +1870,14 @@
             }
           ],
           "description": "Effective colour of the transaction's category (explicit category colour, else its group's); null when uncategorized."
+        },
+        "excluded": {
+          "type": "boolean",
+          "description": "Left out of budget and spending figures in Chipmunk and Insights (not in Actual's own budget screen). Always true when hidden."
+        },
+        "hidden": {
+          "type": "boolean",
+          "description": "Hidden from transaction lists unless showHidden=1; implies excluded."
         }
       }
     },
@@ -2419,6 +2462,187 @@
               "type": "null"
             }
           ]
+        }
+      }
+    },
+    "accountTrend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "direction",
+        "change",
+        "percent",
+        "days"
+      ],
+      "properties": {
+        "direction": {
+          "type": "string",
+          "enum": [
+            "up",
+            "down",
+            "flat"
+          ]
+        },
+        "change": {
+          "$ref": "#/definitions/money"
+        },
+        "percent": {
+          "oneOf": [
+            {
+              "type": "number",
+              "minimum": -100000,
+              "maximum": 100000
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Whole percent change (12.5 = 12.5%); null when the starting balance was zero."
+        },
+        "days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 365
+        }
+      }
+    },
+    "accountDetailResponse": {
+      "description": "GET /accounts/<id>?range=3m|6m|1y|all (default 1y). The account (same shape as in /accounts) and its balance history rebuilt from the account's transactions: chronological points, at most 400 (daily for recent weeks, thinner further back), the last point being today's balance. Unknown or hidden id is 404.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "generatedAt",
+        "range",
+        "account",
+        "history"
+      ],
+      "properties": {
+        "schema": {
+          "const": 1
+        },
+        "generatedAt": {
+          "$ref": "#/definitions/generatedAt"
+        },
+        "range": {
+          "type": "string",
+          "enum": [
+            "3m",
+            "6m",
+            "1y",
+            "all"
+          ]
+        },
+        "account": {
+          "$ref": "#/definitions/account"
+        },
+        "history": {
+          "type": "array",
+          "maxItems": 400,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "date",
+              "balance"
+            ],
+            "properties": {
+              "date": {
+                "$ref": "#/definitions/date"
+              },
+              "balance": {
+                "$ref": "#/definitions/money"
+              }
+            }
+          }
+        }
+      }
+    },
+    "accountSettingsRequest": {
+      "description": "PUT /accounts/<id>/settings (write scope). Marks or unmarks an investment account. Answers okResponse.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "investment"
+      ],
+      "properties": {
+        "investment": {
+          "type": "boolean"
+        }
+      }
+    },
+    "categoryGroupCreateRequest": {
+      "description": "POST /category-groups (write scope). Creates an expense category group. name 1..200 characters after trimming; a duplicate name is 409 conflict.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      }
+    },
+    "categoryCreateRequest": {
+      "description": "POST /categories (write scope). Creates a category in a visible expense group (groupId); name 1..200 characters after trimming; a duplicate name in that group is 409 conflict. budgeted (cents, optional) sets this category's budgeted amount for the CURRENT month only; use Budget Config for a repeating series.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "groupId",
+        "name"
+      ],
+      "properties": {
+        "groupId": {
+          "$ref": "#/definitions/id"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "budgeted": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000000
+        }
+      }
+    },
+    "categoryGroupCreatedResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "group"
+      ],
+      "properties": {
+        "schema": {
+          "const": 1
+        },
+        "group": {
+          "$ref": "#/definitions/categoryGroup"
+        }
+      }
+    },
+    "categoryCreatedResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "groupId",
+        "category"
+      ],
+      "properties": {
+        "schema": {
+          "const": 1
+        },
+        "groupId": {
+          "$ref": "#/definitions/id"
+        },
+        "category": {
+          "$ref": "#/definitions/categoryItem"
         }
       }
     }

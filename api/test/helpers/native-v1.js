@@ -104,6 +104,7 @@ function makeFakeActual(overrides = {}) {
     if (v !== null && typeof v === 'object') {
       if ('$lt' in v) return actual < v.$lt;
       if ('$ne' in v) return actual !== v.$ne;
+      if ('$oneof' in v) return v.$oneof.includes(actual);
       throw new Error('fake AQL: unsupported operator');
     }
     return actual === v;

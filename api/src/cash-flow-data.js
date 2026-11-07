@@ -13,6 +13,10 @@ function monthBounds(month) {
   };
 }
 
+// The filter, and (when given) the clause leaving some rows out. dateRange()
+// already uses $and, so the two are combined in a new one.
+const withExclusion = (filter, exclude) => (exclude ? { $and: [filter, exclude] } : filter);
+
 const byAmountDesc = (a, b) => b.amountCents - a.amountCents;
 
 // Actual only flags its single built-in "Income" group as is_income, but
@@ -29,19 +33,26 @@ const isTransferGroup = (group) => /^transfers?$/i.test(group.name.trim());
 // group's total is the sum of its kept categories so totals always add up.
 // Shared by /api/cash-flow (the Sankey) and /api/savings-rate (the gauge)
 // so the two always agree.
-async function loadMonthCashFlow(client, month) {
+// `exclude` (optional) is an extra AQL clause leaving some rows out (the native
+// spending views pass the excluded/hidden transactions; cash flow proper never does).
+async function loadMonthCashFlow(client, month, { exclude } = {}) {
   const { monthStart, monthEnd } = monthBounds(month);
   const [{ data: rows }, categoryGroups] = await Promise.all([
     client.aqlQuery(
       q('transactions')
         // Opening balances land in the "Starting Balances" income category
         // when an account is added; they're not earnings.
-        .filter({
-          ...dateRange(monthStart, monthEnd),
-          tombstone: false,
-          transfer_id: null,
-          starting_balance_flag: false,
-        })
+        .filter(
+          withExclusion(
+            {
+              ...dateRange(monthStart, monthEnd),
+              tombstone: false,
+              transfer_id: null,
+              starting_balance_flag: false,
+            },
+            exclude
+          )
+        )
         .groupBy('category')
         .select([{ categoryId: 'category' }, { amountCents: { $sum: '$amount' } }])
     ),

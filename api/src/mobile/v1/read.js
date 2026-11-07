@@ -2,6 +2,9 @@ const { q } = require('@actual-app/api');
 
 const { loadColorResolver, createColorResolver } = require('./colors');
 const { readColors } = require('../../mobile-colors-store');
+const { withInvestment } = require('./accounts');
+const { readFlags, effective } = require('../../mobile-transaction-flags-store');
+const { adjustedBudgetMonth, notInClause } = require('./exclusions');
 const { DATE_PATTERN, ID_PATTERN, MAX_NOTE, badRequest, notFound, clip, isValidId, money, isHidden, isIncome } = require('./common');
 
 // The read side of /api/mobile/v1: pure builders from the Actual client to the
@@ -71,7 +74,7 @@ async function buildAccounts(client, now = new Date()) {
   // On-budget first, then off-budget, each in Actual's sidebar order; ordered
   // before the cap so a long off-budget list can never push an on-budget account out.
   const ordered = [...sidebarOrder(open.filter((a) => !a.offbudget), groupIds), ...sidebarOrder(open.filter((a) => a.offbudget), groupIds)].slice(0, MAX_ACCOUNTS);
-  const accounts = await Promise.all(
+  const plain = await Promise.all(
     ordered.map(async (account) => {
       let balance = null;
       try {
@@ -84,6 +87,7 @@ async function buildAccounts(client, now = new Date()) {
       return { id: account.id, name: clip(account.name), balance: balance === null ? null : money(balance), onBudget: !account.offbudget, groupId };
     })
   );
+  const accounts = await withInvestment(client, plain, now);
   // Groups with at least one account shown, in Actual's order. A group's
   // balance is the sum over its shown accounts (both sides), null if any is unknown.
   const groups = groupList
@@ -100,7 +104,8 @@ async function buildAccounts(client, now = new Date()) {
 
 // One AQL row -> the schema's transaction. Null when the row can't be shown
 // (a deleted row, or an id the schema would not accept).
-function mapTransaction(row, colors) {
+// `flags` is the flag store's id -> {excluded, hidden} (none when omitted).
+function mapTransaction(row, colors, flags) {
   if (!row || row.tombstone) return null;
   if (!isValidId(row.id) || !isValidId(row.account) || !DATE_PATTERN.test(String(row.date))) return null;
   const transfer = row.transfer_id != null;
@@ -124,6 +129,7 @@ function mapTransaction(row, colors) {
     split: Boolean(row.is_parent),
     // A split parent has no category of its own, so no colour either.
     color: category && !row.is_parent && colors ? colors.category(category.id) : null,
+    ...effective(flags && flags[row.id]),
   };
 }
 
@@ -190,10 +196,17 @@ async function assertAccountExists(client, accountId) {
 
 // params: { account?, uncategorized: boolean, group?, category?, limit, cursor? } (already validated).
 async function buildTransactions(client, params, now = new Date()) {
-  const { account, uncategorized = false, group, category, limit = DEFAULT_LIMIT, cursor } = params;
+  const { account, uncategorized = false, group, category, limit = DEFAULT_LIMIT, cursor, showHidden = false } = params;
   if (account) await assertAccountExists(client, account);
 
+  // Flags are read once. The uncategorized view never lists an excluded
+  // transaction (hidden ones included); otherwise hidden ones are left out
+  // unless showHidden asks for them, and excluded ones always show (marked).
+  const flags = await readFlags();
+  const flagged = (pick) => Object.keys(flags).filter((id) => pick(flags[id]));
+  const leftOut = notInClause(uncategorized ? flagged((f) => f.excluded) : showHidden ? [] : flagged((f) => f.hidden));
   const filters = transactionFilters({ account, uncategorized, group, category });
+  if (leftOut) filters.push(leftOut);
   const pageFilters = [...filters];
   if (cursor) {
     const after = decodeCursor(cursor);
@@ -212,7 +225,7 @@ async function buildTransactions(client, params, now = new Date()) {
 
   const rows = data || [];
   const hasMore = rows.length > limit;
-  const transactions = rows.slice(0, limit).map((row) => mapTransaction(row, colors)).filter(Boolean);
+  const transactions = rows.slice(0, limit).map((row) => mapTransaction(row, colors, flags)).filter(Boolean);
   // The cursor is the last row of the page as fetched (not of the rows that
   // could be shown), so an unshowable trailing row can't repeat or skip anything.
   const lastRow = rows[limit - 1];
@@ -221,9 +234,10 @@ async function buildTransactions(client, params, now = new Date()) {
   const body = { schema: 1, generatedAt: now.toISOString(), transactions, nextCursor };
 
   if (!cursor) {
+    const uncategorizedLeftOut = notInClause(flagged((f) => f.excluded));
     const count = await client.aqlQuery(
       baseTransactionQuery()
-        .filter({ $and: transactionFilters({ account, uncategorized: true }) })
+        .filter({ $and: [...transactionFilters({ account, uncategorized: true }), ...(uncategorizedLeftOut ? [uncategorizedLeftOut] : [])] })
         .calculate({ $count: '$id' })
     );
     const value = count && count.data;
@@ -239,7 +253,7 @@ const DETAIL_FIELDS = [...TX_FIELDS, 'imported_payee', 'imported_id', 'reconcile
 async function buildTransactionDetail(client, id) {
   const { data } = await client.aqlQuery(baseTransactionQuery().filter({ id }).select(DETAIL_FIELDS).limit(1));
   const row = data && data[0];
-  const base = mapTransaction(row, await loadColorResolver(client));
+  const base = mapTransaction(row, await loadColorResolver(client), await readFlags());
   if (!base) return null;
 
   let splits = [];
@@ -335,7 +349,7 @@ function budgetTotals(budgetMonth) {
 // Expense groups only, hidden ones left out; each group's sums come from the
 // categories shown, so the numbers on screen always add up.
 async function buildBudgetMonth(client, month, now = new Date()) {
-  const budgetMonth = await client.getBudgetMonth(month);
+  const budgetMonth = await adjustedBudgetMonth(client, month);
   const colors = await loadColorResolver(client);
   const groups = [];
   for (const group of (budgetMonth && budgetMonth.categoryGroups) || []) {

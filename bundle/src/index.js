@@ -6,6 +6,7 @@ import MonthEndNet from './widgets/MonthEndNet.svelte';
 import PaycheckAlertBanner from './widgets/PaycheckAlertBanner.svelte';
 import BillsTimeline from './widgets/BillsTimeline.svelte';
 import AccountBalancesChart from './widgets/AccountBalancesChart.svelte';
+import AccountBalanceList from './widgets/AccountBalanceList.svelte';
 import UnlinkedTransfers from './widgets/UnlinkedTransfers.svelte';
 import SpendingBreakdownDonut from './widgets/SpendingBreakdownDonut.svelte';
 import SavingsGoalsThermometers from './widgets/SavingsGoalsThermometers.svelte';
@@ -115,10 +116,25 @@ mountWidget('{{INSIGHTS:bills-timeline:', (host) => {
 //   {{INSIGHTS:account-balances:["accountId1","accountId2"]}}
 // or, to also set labelContent:
 //   {{INSIGHTS:account-balances:{"accountIds":[],"labelContent":"amount"}}}
+// The object form may also carry `chart` ('stacked' | 'lines', default
+// stacked) and `range` ('1M' | '3M' | '6M' | '1Y' | 'ALL', default 1M): the
+// chart's initial view and range (the buttons still change them).
 mountWidget('{{INSIGHTS:account-balances:', (host, config) => {
+  const object = config && typeof config === 'object' && !Array.isArray(config);
   const accountIds = Array.isArray(config) ? config : (config?.accountIds ?? []);
   const labelContent = Array.isArray(config) ? 'both' : (config?.labelContent ?? 'both');
-  new AccountBalancesChart({ target: host, props: { accountIds, labelContent } });
+  const chart = object && config.chart === 'lines' ? 'lines' : 'stacked';
+  const range = object && typeof config.range === 'string' ? config.range : '1M';
+  new AccountBalancesChart({ target: host, props: { accountIds, labelContent, chart, range } });
+});
+
+// AccountBalanceList: the selected accounts' current balances as a list.
+// Empty accountIds means every open account; showTotal adds a Total row.
+//   {{INSIGHTS:account-balance-list:{"accountIds":[],"showTotal":true}}}
+mountWidget('{{INSIGHTS:account-balance-list:', (host, config) => {
+  const accountIds = Array.isArray(config) ? config : (config?.accountIds ?? []);
+  const showTotal = Boolean(config && !Array.isArray(config) && config.showTotal === true);
+  new AccountBalanceList({ target: host, props: { accountIds, showTotal } });
 });
 
 // UnlinkedTransfers takes no config, same convention as month-end-net and

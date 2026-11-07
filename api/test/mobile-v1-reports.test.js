@@ -719,7 +719,7 @@ describe('breakdown drills', () => {
       }),
     };
     const groups = [{ id: 'g1', name: 'Home', categories: [{ id: 'c1' }] }, { id: 'g3', name: 'Empty', categories: [{ id: 'c9', hidden: true }] }];
-    const ctx = { client, month: '2026-11', categoryGroups: async () => groups, colors: async () => createColorResolver(groups) };
+    const ctx = { client, month: '2026-11', excludeClause: async () => null, categoryGroups: async () => groups, colors: async () => createColorResolver(groups) };
     const card = await insightsBuilder('donut').build(ctx, []);
     expect(card.items).toEqual([{ label: 'Home', value: 500, drill: { level: 'categories', categoryIds: ['c1'] }, color: 'blue' }, { label: 'Empty', value: 100, color: 'teal' }]);
   });
@@ -838,6 +838,100 @@ describe('multiseries: account balances', () => {
     expect(series).toHaveLength(12);
     expect(series[11].name).toBe('Other accounts');
     expect(series[11].values[0]).toBe(100 + 200 + 300);
+  });
+});
+
+describe('multiseries: account balances chart and range options', () => {
+  const md = (config) => ({ content: `{{INSIGHTS:account-balances:${config}}}` });
+  const days = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
+
+  test('chart "lines" gives a line chart, "stacked" and the bare/older forms stay stackedArea', async () => {
+    expect((await one('markdown-card', md('{"accountIds":[],"chart":"lines"}'))).chart).toBe('line');
+    expect((await one('markdown-card', md('{"chart":"stacked"}'))).chart).toBe('stackedArea');
+    expect((await one('markdown-card', md('{"accountIds":[],"labelContent":"both"}'))).chart).toBe('stackedArea');
+    expect((await one('markdown-card', md('[]'))).chart).toBe('stackedArea');
+    expect((await one('markdown-card', md('{"chart":"weird","range":"weird"}'))).labels).toHaveLength(32);
+  });
+
+  test('1M and 3M are daily', async () => {
+    expect((await one('markdown-card', md('{"range":"1M"}'))).labels).toHaveLength(32);
+    const three = await one('markdown-card', md('{"range":"3M"}'));
+    expect(three.labels[0]).toBe('2026-08-12');
+    expect(three.labels).toHaveLength(93);
+  });
+
+  test('6M and 1Y are weekly and end today', async () => {
+    for (const range of ['6M', '1Y']) {
+      const card = await one('markdown-card', md(`{"range":"${range}"}`));
+      expect(card.labels[card.labels.length - 1]).toBe('2026-11-12');
+      for (let i = 1; i < card.labels.length; i += 1) expect(days(card.labels[i - 1], card.labels[i])).toBe(7);
+      expect(card.series.every((x) => x.values.length === card.labels.length)).toBe(true);
+    }
+    expect((await one('markdown-card', md('{"range":"6M"}'))).labels.length).toBeLessThan(30);
+  });
+
+  test('ALL is monthly: month ends, the first day and today', async () => {
+    const card = await one('markdown-card', md('{"range":"ALL"}'));
+    expect(card.labels[0]).toBe('2026-01-02');
+    expect(card.labels).toContain('2026-09-30');
+    expect(card.labels).toContain('2026-10-31');
+    expect(card.labels[card.labels.length - 1]).toBe('2026-11-12');
+    expect(card.labels.length).toBeLessThan(15);
+    expect(card.series[0].values[card.labels.length - 1]).toBe(1390500);
+  });
+
+  test('never more than 400 points', async () => {
+    const client = makeClient({ dashboard: [widget(U(1), 'markdown-card', md('{"range":"ALL"}'))] });
+    client.getTransactions.mockImplementation(async (id) => (id === 'a-chk' ? [{ date: '1960-01-01', amount: 100 }] : []));
+    const body = await buildReports({ client, now: NOW });
+    expectValid(body);
+    expect(body.cards[0].labels.length).toBeLessThanOrEqual(400);
+    expect(body.cards[0].labels[body.cards[0].labels.length - 1]).toBe('2026-11-12');
+  });
+});
+
+describe('list: account balance list', () => {
+  const md = (config) => ({ content: `{{INSIGHTS:account-balance-list:${config}}}` });
+
+  test('every open account by default, with budget side and balance in cents, no total', async () => {
+    const card = await one('markdown-card', md('{"accountIds":[],"showTotal":false}'));
+    expect(card).toMatchObject({ kind: 'list', title: 'Account balances' });
+    expect(card.rows).toEqual([
+      { title: 'Checking', subtitle: 'On budget', value: 123456 },
+      { title: 'Savings', subtitle: 'On budget', value: 5000 },
+      { title: 'Brokerage', subtitle: 'Off budget', value: 5000 },
+    ]);
+  });
+
+  test('picked accounts in the picked order, then a Total row', async () => {
+    const card = await one('markdown-card', md('{"accountIds":["a-inv","a-chk","a-old","nope"],"showTotal":true}'));
+    expect(card.rows).toEqual([
+      { title: 'Brokerage', subtitle: 'Off budget', value: 5000 },
+      { title: 'Checking', subtitle: 'On budget', value: 123456 },
+      { title: 'Total', value: 128456 },
+    ]);
+  });
+
+  test('a missing showTotal means no total', async () => {
+    expect((await one('markdown-card', md('{"accountIds":["a-chk"]}'))).rows).toHaveLength(1);
+  });
+
+  test('hidden accounts are neither listed nor counted (scoped client)', async () => {
+    const { scopeClient } = require('../src/mobile/v1/hidden');
+    const client = scopeClient(makeClient({ dashboard: [widget(U(1), 'markdown-card', md('{"accountIds":[],"showTotal":true}'))] }), ['a-sav']);
+    const body = await buildReports({ client, now: NOW });
+    expectValid(body);
+    expect(body.cards[0].rows.map((r) => [r.title, r.value])).toEqual([['Checking', 123456], ['Brokerage', 5000], ['Total', 128456]]);
+  });
+
+  test('at most 60 rows including the total', async () => {
+    const accounts = Array.from({ length: 70 }, (_, i) => ({ id: `acc-${i}`, name: `Acct ${i}`, offbudget: false, closed: false }));
+    const client = makeClient({ dashboard: [widget(U(1), 'markdown-card', md('{"showTotal":true}'))] });
+    client.getAccounts.mockResolvedValue(accounts);
+    const body = await buildReports({ client, now: NOW });
+    expectValid(body);
+    expect(body.cards[0].rows).toHaveLength(60);
+    expect(body.cards[0].rows[59].title).toBe('Total');
   });
 });
 

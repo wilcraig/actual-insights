@@ -54,6 +54,36 @@ export const WIDGET_REGISTRY = [
           { value: 'name', label: 'Account name only' },
         ],
       },
+      {
+        key: 'chart',
+        type: 'select',
+        label: 'Chart',
+        options: [
+          { value: 'stacked', label: 'Stacked area' },
+          { value: 'lines', label: 'Lines' },
+        ],
+      },
+      {
+        key: 'range',
+        type: 'select',
+        label: 'Range',
+        options: [
+          { value: '1M', label: '1M' },
+          { value: '3M', label: '3M' },
+          { value: '6M', label: '6M' },
+          { value: '1Y', label: '1Y' },
+          { value: 'ALL', label: 'All' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'account-balance-list',
+    label: 'Account balances list',
+    fields: [
+      // Nothing picked means every open account.
+      { key: 'accountIds', type: 'account-multiselect', label: 'Accounts', optional: true },
+      { key: 'showTotal', type: 'checkbox', label: 'Show total' },
     ],
   },
   {

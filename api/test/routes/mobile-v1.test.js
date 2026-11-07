@@ -161,9 +161,9 @@ describe('GET /accounts', () => {
     await withServer(async (base) => {
       const body = await json(await get(base, token, '/accounts'), 'accountsResponse');
       expect(body.accounts).toEqual([
-        { id: 'a-chk', name: 'Everyday Checking', balance: 312450, onBudget: true, groupId: null },
-        { id: 'a-sav', name: 'Rainy Day Savings', balance: 1050000, onBudget: true, groupId: null },
-        { id: 'a-ret', name: 'Retirement', balance: 9900000, onBudget: false, groupId: null },
+        { id: 'a-chk', name: 'Everyday Checking', balance: 312450, onBudget: true, groupId: null, investment: false, trend: null },
+        { id: 'a-sav', name: 'Rainy Day Savings', balance: 1050000, onBudget: true, groupId: null, investment: false, trend: null },
+        { id: 'a-ret', name: 'Retirement', balance: 9900000, onBudget: false, groupId: null, investment: false, trend: null },
       ]);
     });
   });
@@ -186,7 +186,7 @@ describe('GET /transactions', () => {
       expect(body.transactions.map((t) => t.id)).toEqual(['t-01', 't-04x', 't-04', 't-03', 't-02', 't-05', 't-07', 't-09', 't-10', 't-11']);
       expect(body.nextCursor).toBeNull();
       const byId = Object.fromEntries(body.transactions.map((t) => [t.id, t]));
-      expect(byId['t-01']).toEqual({ id: 't-01', date: '2026-11-11', accountId: 'a-chk', accountName: 'Everyday Checking', payee: 'Example Grocer', amount: -8423, category: { id: 'c-groc', name: 'Groceries' }, categoryGroup: 'Usual Expenses', notes: null, cleared: true, transfer: false, split: false, color: 'blue' });
+      expect(byId['t-01']).toEqual({ id: 't-01', date: '2026-11-11', accountId: 'a-chk', accountName: 'Everyday Checking', payee: 'Example Grocer', amount: -8423, category: { id: 'c-groc', name: 'Groceries' }, categoryGroup: 'Usual Expenses', notes: null, cleared: true, transfer: false, split: false, color: 'blue', excluded: false, hidden: false });
       expect(byId['t-04']).toMatchObject({ transfer: true, payee: 'Transfer: Everyday Checking', category: null });
       expect(byId['t-05'].split).toBe(true);
       expect(byId['t-03'].notes).toBeNull();
@@ -334,7 +334,7 @@ describe('GET /transactions/:id', () => {
     const { token } = await newToken();
     await withServer(async (base) => {
       const plain = (await json(await get(base, token, '/transactions/t-02'), 'transactionDetailResponse')).transaction;
-      expect(plain).toEqual({ id: 't-02', date: '2026-11-10', accountId: 'a-chk', accountName: 'Everyday Checking', payee: 'Example Hardware', amount: -2399, category: null, categoryGroup: null, notes: 'screws #house #diy #house', cleared: false, reconciled: false, transfer: false, split: false, importedPayee: 'EXAMPLE HDWR #1234', importedId: 'SFIN-0001', recurring: 'Hardware club', tags: ['house', 'diy'], splits: [], transferAccountName: null, color: null });
+      expect(plain).toEqual({ id: 't-02', date: '2026-11-10', accountId: 'a-chk', accountName: 'Everyday Checking', payee: 'Example Hardware', amount: -2399, category: null, categoryGroup: null, notes: 'screws #house #diy #house', cleared: false, reconciled: false, transfer: false, split: false, importedPayee: 'EXAMPLE HDWR #1234', importedId: 'SFIN-0001', recurring: 'Hardware club', tags: ['house', 'diy'], splits: [], transferAccountName: null, color: null, excluded: false, hidden: false });
       const manual = (await json(await get(base, token, '/transactions/t-01'), 'transactionDetailResponse')).transaction;
       expect(manual).toMatchObject({ categoryGroup: 'Usual Expenses', importedPayee: null, importedId: null, recurring: null, tags: [], reconciled: false });
       const split = (await json(await get(base, token, '/transactions/t-05'), 'transactionDetailResponse')).transaction;

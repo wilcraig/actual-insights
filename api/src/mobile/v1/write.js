@@ -1,8 +1,11 @@
 const { scopedClient: getActualClient } = require('./hidden');
-const { MAX_BUDGETED, MAX_MONEY, MAX_NOTE, badRequest, notFound, isHidden, isIncome, monthWithinWindow } = require('./common');
+const { MAX_BUDGETED, MAX_MONEY, MAX_NOTE, HttpError, badRequest, notFound, isHidden, isIncome, monthWithinWindow, clip } = require('./common');
+const { getFlags, setFlags } = require('../../mobile-transaction-flags-store');
+const { adjustedBudgetMonth } = require('./exclusions');
 const { readTransactionRow, buildTransactionDetail, budgetCategory, budgetTotals } = require('./read');
 const { appendAudit } = require('./audit');
-const { loadColorResolver } = require('./colors');
+const { loadColorResolver, createColorResolver } = require('./colors');
+const { readColors } = require('../../mobile-colors-store');
 
 // The write side of /api/mobile/v1. These change a real budget, so every
 // operation: runs alone (one write at a time, server-wide), validates
@@ -50,10 +53,27 @@ async function requireExpenseCategory(client, categoryId) {
 
 const clipLog = (value) => (typeof value === 'string' ? value.slice(0, 80) : value);
 
-// Change any of a transaction's category, notes and cleared flag (`changes`
-// holds exactly the keys the caller sent). Everything is validated before
-// anything is touched; one updateTransaction carries the fields that really
-// change, and the answer is the transaction detail as it is afterwards.
+// The flags a PATCH leaves a transaction with (`changes` may hold excluded
+// and/or hidden). hidden implies excluded: hidden true makes it excluded,
+// hidden false leaves excluded as it was, and excluded false on a hidden
+// transaction (now or after this PATCH) is a 400.
+function nextFlags(current, changes) {
+  const hidden = 'hidden' in changes ? changes.hidden : current.hidden;
+  let excluded = 'excluded' in changes ? changes.excluded : current.excluded;
+  if (hidden) {
+    if ('excluded' in changes && changes.excluded === false) throw badRequest();
+    excluded = true;
+  }
+  return { excluded, hidden };
+}
+
+// Change any of a transaction's category, notes and cleared flag, and its
+// Insights flags excluded and hidden (`changes` holds exactly the keys the
+// caller sent). Everything is validated before anything is touched; one
+// updateTransaction carries the Actual fields that really change (none for a
+// flag-only change: no Actual call, no sync), the flags are written AFTER that
+// succeeded (they live in Insights, not in Actual), and the answer is the
+// transaction detail as it is afterwards.
 async function updateTransactionFields({ tokenId, transactionId, changes }) {
   return exclusive(async () => {
     const client = await getActualClient();
@@ -68,6 +88,9 @@ async function updateTransactionFields({ tokenId, transactionId, changes }) {
     }
     // A reconciliation locks the cleared flag; notes and category stay editable.
     if ('cleared' in changes && row.reconciled && changes.cleared !== current.cleared) throw badRequest();
+
+    const flagsBefore = await getFlags(transactionId);
+    const flagsAfter = 'excluded' in changes || 'hidden' in changes ? nextFlags(flagsBefore, changes) : flagsBefore;
 
     const before = {};
     const after = {};
@@ -98,6 +121,16 @@ async function updateTransactionFields({ tokenId, transactionId, changes }) {
       await client.updateTransaction(transactionId, fields);
       await appendAudit({ tokenId, op: 'transaction.update', ids: { transaction: transactionId }, before, after });
       await syncNow(client);
+    }
+
+    if (flagsAfter.excluded !== flagsBefore.excluded || flagsAfter.hidden !== flagsBefore.hidden) {
+      try {
+        await setFlags(transactionId, flagsAfter);
+      } catch (err) {
+        if (err && err.code === 'FULL') throw badRequest();
+        throw err;
+      }
+      await appendAudit({ tokenId, op: 'transaction.update', ids: { transaction: transactionId }, before: { ...flagsBefore }, after: { ...flagsAfter } });
     }
 
     const detail = await buildTransactionDetail(client, transactionId);
@@ -270,7 +303,7 @@ async function setBudgetedAmount({ tokenId, month, categoryId, budgeted }) {
     });
     await syncNow(client);
 
-    const fresh = await client.getBudgetMonth(month);
+    const fresh = await adjustedBudgetMonth(client, month);
     const line = findLine(fresh, categoryId);
     const colors = await loadColorResolver(client);
     return { schema: 1, month, categories: [budgetCategory(line || { ...current, budgeted }, colors)], totals: budgetTotals(fresh) };
@@ -315,11 +348,58 @@ async function moveBudget({ tokenId, month, from, to, amount }) {
     });
     await syncNow(client);
 
-    const fresh = await client.getBudgetMonth(month);
+    const fresh = await adjustedBudgetMonth(client, month);
     const lines = [from, to].map((id, i) => findLine(fresh, id) || { ...(i === 0 ? fromLine : toLine), budgeted: i === 0 ? fromAfter : toAfter });
     const colors = await loadColorResolver(client);
     return { schema: 1, month, categories: lines.map((l) => budgetCategory(l, colors)), totals: budgetTotals(fresh) };
   });
 }
 
-module.exports = { updateTransactionFields, splitTransactionLines, removeSplit, setBudgetedAmount, moveBudget, exclusive, syncNow, findCategory };
+const currentMonth = (now = new Date()) => `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+const sameName = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+const conflict = () => new HttpError(409, 'conflict');
+
+// New expense category group. A name already used by a visible group (any
+// case) is a 409.
+async function createGroup({ tokenId, name }) {
+  return exclusive(async () => {
+    const client = await getActualClient();
+    const groups = (await client.getCategoryGroups()) || [];
+    if (groups.some((g) => !g.hidden && sameName(g.name, name))) throw conflict();
+
+    const id = await client.createCategoryGroup({ name, is_income: false });
+    await appendAudit({ tokenId, op: 'category-group.create', ids: { group: id }, after: { name: clipLog(name) } });
+    await syncNow(client);
+
+    const fresh = (await client.getCategoryGroups()) || [];
+    const colors = createColorResolver(fresh, await readColors());
+    return { schema: 1, group: { id, name: clip(name), isIncome: false, categories: [], color: colors.group(id) } };
+  });
+}
+
+// New category in a visible expense group; a name already in that group (any
+// case, hidden categories too) is a 409. `budgeted`, when given, is set for
+// the CURRENT month inside the same locked section, with one sync at the end.
+async function createCategory({ tokenId, groupId, name, budgeted }) {
+  return exclusive(async () => {
+    const client = await getActualClient();
+    const group = ((await client.getCategoryGroups()) || []).find((g) => g.id === groupId);
+    if (!group) throw notFound();
+    if (isHidden(group) || isIncome(group)) throw badRequest();
+    if ((group.categories || []).some((c) => sameName(c.name, name))) throw conflict();
+
+    const id = await client.createCategory({ name, group_id: groupId });
+    await appendAudit({ tokenId, op: 'category.create', ids: { group: groupId, category: id }, after: { name: clipLog(name) } });
+    if (budgeted !== undefined) {
+      const month = currentMonth();
+      await client.setBudgetAmount(month, id, budgeted);
+      await appendAudit({ tokenId, op: 'budget.set', ids: { month, category: id }, before: { budgeted: 0 }, after: { budgeted } });
+    }
+    await syncNow(client);
+
+    const colors = await loadColorResolver(client);
+    return { schema: 1, groupId, category: { id, name: clip(name), color: colors.category(id) } };
+  });
+}
+
+module.exports = { createGroup, createCategory, updateTransactionFields, splitTransactionLines, removeSplit, setBudgetedAmount, moveBudget, exclusive, syncNow, findCategory };

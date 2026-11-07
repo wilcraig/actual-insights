@@ -13,21 +13,32 @@
         "name": "Everyday Checking",
         "balance": 312450,
         "onBudget": true,
-        "groupId": "grp-cash"
+        "groupId": "grp-cash",
+        "investment": false,
+        "trend": null
       },
       {
         "id": "acct-savings-0002",
         "name": "Rainy Day Savings",
         "balance": 1050000,
         "onBudget": true,
-        "groupId": "grp-cash"
+        "groupId": "grp-cash",
+        "investment": false,
+        "trend": null
       },
       {
         "id": "acct-retire-0003",
         "name": "Retirement",
         "balance": 9900000,
         "onBudget": false,
-        "groupId": null
+        "groupId": null,
+        "investment": true,
+        "trend": {
+          "direction": "up",
+          "change": 120000,
+          "percent": 1.2,
+          "days": 30
+        }
       }
     ],
     "groups": [
@@ -59,7 +70,9 @@
         "transfer": false,
         "split": false,
         "categoryGroup": "Usual Expenses",
-        "color": "green"
+        "color": "green",
+        "excluded": false,
+        "hidden": false
       },
       {
         "id": "tx-0002",
@@ -74,7 +87,9 @@
         "transfer": false,
         "split": false,
         "categoryGroup": null,
-        "color": null
+        "color": null,
+        "excluded": true,
+        "hidden": false
       },
       {
         "id": "tx-0003",
@@ -89,7 +104,9 @@
         "transfer": true,
         "split": false,
         "categoryGroup": null,
-        "color": null
+        "color": null,
+        "excluded": false,
+        "hidden": false
       }
     ],
     "nextCursor": "c_2026-11-09_tx-0003"
@@ -176,7 +193,8 @@
   "transactionUpdateRequest": {
     "category": "cat-groceries",
     "notes": "screws #house",
-    "cleared": true
+    "cleared": true,
+    "excluded": true
   },
   "budgetAmountRequest": {
     "budgeted": 47500
@@ -459,7 +477,9 @@
       ],
       "splits": [],
       "transferAccountName": null,
-      "color": "green"
+      "color": "green",
+      "excluded": false,
+      "hidden": false
     }
   },
   "reportListResponse": {
@@ -810,5 +830,68 @@
   },
   "colorSetRequest": {
     "color": "orange"
+  },
+  "accountDetailResponse": {
+    "schema": 1,
+    "generatedAt": "2026-11-12T15:04:05.000Z",
+    "range": "1y",
+    "account": {
+      "id": "acct-retire-0003",
+      "name": "Retirement",
+      "balance": 9900000,
+      "onBudget": false,
+      "groupId": null,
+      "investment": true,
+      "trend": {
+        "direction": "up",
+        "change": 120000,
+        "percent": 1.2,
+        "days": 30
+      }
+    },
+    "history": [
+      {
+        "date": "2025-11-12",
+        "balance": 9100000
+      },
+      {
+        "date": "2026-10-12",
+        "balance": 9780000
+      },
+      {
+        "date": "2026-11-12",
+        "balance": 9900000
+      }
+    ]
+  },
+  "accountSettingsRequest": {
+    "investment": true
+  },
+  "categoryGroupCreateRequest": {
+    "name": "Pets"
+  },
+  "categoryCreateRequest": {
+    "groupId": "grp-usual",
+    "name": "Vet",
+    "budgeted": 5000
+  },
+  "categoryGroupCreatedResponse": {
+    "schema": 1,
+    "group": {
+      "id": "grp-pets",
+      "name": "Pets",
+      "isIncome": false,
+      "color": "teal",
+      "categories": []
+    }
+  },
+  "categoryCreatedResponse": {
+    "schema": 1,
+    "groupId": "grp-usual",
+    "category": {
+      "id": "cat-vet",
+      "name": "Vet",
+      "color": "blue"
+    }
   }
 }

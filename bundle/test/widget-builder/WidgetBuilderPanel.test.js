@@ -300,7 +300,7 @@ test('a select-type field (account-balances\' labelContent) defaults to its firs
   generateButton.click();
   await flush();
   expect(document.querySelector('.actualmint-wb-textarea').value).toBe(
-    '{{INSIGHTS:account-balances:{"accountIds":["acc1"],"labelContent":"both"}}}',
+    '{{INSIGHTS:account-balances:{"accountIds":["acc1"],"labelContent":"both","chart":"stacked","range":"1M"}}}',
   );
 
   labelSelect.value = 'amount';
@@ -309,7 +309,38 @@ test('a select-type field (account-balances\' labelContent) defaults to its firs
   generateButton.click();
   await flush();
   expect(document.querySelector('.actualmint-wb-textarea').value).toBe(
-    '{{INSIGHTS:account-balances:{"accountIds":["acc1"],"labelContent":"amount"}}}',
+    '{{INSIGHTS:account-balances:{"accountIds":["acc1"],"labelContent":"amount","chart":"stacked","range":"1M"}}}',
+  );
+});
+
+test('account-balance-list: generates without picking accounts (empty = every account) and carries the Show total checkbox', async () => {
+  fetchApi.mockResolvedValueOnce(okJson({ categories: [{ id: 'c1', name: 'Groceries' }] }));
+  mount();
+  await flush();
+  open();
+  await flush();
+
+  fetchApi.mockResolvedValueOnce(okJson({ accounts: [{ id: 'acc1', name: 'Checking' }] }));
+  const widgetSelect = document.querySelector('.actualmint-wb-field select');
+  widgetSelect.value = 'account-balance-list';
+  widgetSelect.dispatchEvent(new Event('change', { bubbles: true }));
+  await flush();
+
+  const generateButton = document.querySelector('.actualmint-wb-generate');
+  expect(generateButton.disabled).toBe(false);
+  generateButton.click();
+  await flush();
+  expect(document.querySelector('.actualmint-wb-textarea').value).toBe(
+    '{{INSIGHTS:account-balance-list:{"accountIds":[],"showTotal":false}}}',
+  );
+
+  const showTotal = Array.from(document.querySelectorAll('.actualmint-wb-checkbox input[type="checkbox"]')).pop();
+  showTotal.click();
+  await flush();
+  generateButton.click();
+  await flush();
+  expect(document.querySelector('.actualmint-wb-textarea').value).toBe(
+    '{{INSIGHTS:account-balance-list:{"accountIds":[],"showTotal":true}}}',
   );
 });
 
