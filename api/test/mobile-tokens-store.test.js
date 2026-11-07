@@ -42,7 +42,7 @@ test('the plain token never appears in the store file; only its SHA-256 hash doe
   expect(raw).not.toContain(token);
   expect(raw).toContain(sha256(token));
   const stored = JSON.parse(raw).tokens[0];
-  expect(Object.keys(stored).sort()).toEqual(['createdAt', 'hash', 'id', 'label', 'lastUsedAt']);
+  expect(Object.keys(stored).sort()).toEqual(['createdAt', 'hash', 'id', 'label', 'lastUsedAt', 'scope']);
   expect(stored.lastUsedAt).toBeNull();
 });
 
@@ -58,7 +58,7 @@ test('listTokens never includes a hash or a token', async () => {
   const { token } = await store.createToken('phone', dir);
   const list = await store.listTokens(dir);
   expect(list).toHaveLength(1);
-  expect(Object.keys(list[0]).sort()).toEqual(['createdAt', 'id', 'label', 'lastUsedAt']);
+  expect(Object.keys(list[0]).sort()).toEqual(['createdAt', 'id', 'label', 'lastUsedAt', 'scope']);
   expect(JSON.stringify(list)).not.toContain(token);
   expect(JSON.stringify(list)).not.toContain(sha256(token));
 });
@@ -98,7 +98,7 @@ test('verifyToken accepts a valid token and returns its record without secrets',
   const dir = await tmpDir();
   const { token, id } = await store.createToken('phone', dir);
   const record = await store.verifyToken(token, dir);
-  expect(record).toEqual({ id, label: 'phone', createdAt: expect.any(String), lastUsedAt: null });
+  expect(record).toEqual({ id, label: 'phone', scope: 'read', createdAt: expect.any(String), lastUsedAt: null });
 });
 
 test('verifyToken rejects missing, empty, garbage, wrong-length, and non-string input', async () => {
@@ -173,4 +173,39 @@ test('no temp files are left behind', async () => {
   const dir = await tmpDir();
   await Promise.all([store.createToken('a', dir), store.createToken('b', dir), store.createToken('c', dir)]);
   expect(await fs.readdir(dir)).toEqual(['mobile-tokens.json']);
+});
+
+describe('scopes', () => {
+  test('a token is read-only unless write is asked for', async () => {
+    const dir = await tmpDir();
+    const a = await store.createToken('a', dir);
+    const b = await store.createToken('b', dir, { scope: 'write' });
+    const c = await store.createToken('c', dir, { scope: 'read' });
+    expect([a.scope, b.scope, c.scope]).toEqual(['read', 'write', 'read']);
+    expect((await store.listTokens(dir)).map((t) => t.scope)).toEqual(['read', 'write', 'read']);
+    expect((await store.verifyToken(a.token, dir)).scope).toBe('read');
+    expect((await store.verifyToken(b.token, dir)).scope).toBe('write');
+  });
+
+  test('anything but read or write is refused and nothing is stored', async () => {
+    const dir = await tmpDir();
+    for (const scope of ['admin', 'WRITE', '', null, 1, {}, ['write']]) {
+      expect(await store.createToken('x', dir, { scope })).toEqual({ ok: false, error: "scope must be 'read' or 'write'", status: 400 });
+    }
+    expect(await store.listTokens(dir)).toEqual([]);
+  });
+
+  test('a record written before scopes existed reads as read-only, and an odd stored scope fails closed', async () => {
+    const dir = await tmpDir();
+    const { token } = await store.createToken('old', dir, { scope: 'write' });
+    const file = path.join(dir, 'mobile-tokens.json');
+    const stored = JSON.parse(await fs.readFile(file, 'utf8'));
+    delete stored.tokens[0].scope;
+    await fs.writeFile(file, JSON.stringify(stored));
+    expect((await store.verifyToken(token, dir)).scope).toBe('read');
+    expect((await store.listTokens(dir))[0].scope).toBe('read');
+    stored.tokens[0].scope = 'superuser';
+    await fs.writeFile(file, JSON.stringify(stored));
+    expect((await store.verifyToken(token, dir)).scope).toBe('read');
+  });
 });

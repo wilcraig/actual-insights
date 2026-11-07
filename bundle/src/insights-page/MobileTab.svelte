@@ -15,6 +15,7 @@
   let loaded = $state(false);
   let loadError = $state(null);
   let label = $state('');
+  let allowEdit = $state(false);
   let busy = $state(false);
   let error = $state(null);
   let issued = $state(null); // { token, pairingUrl, svg } until dismissed
@@ -60,10 +61,11 @@
     error = null;
     dismiss();
     try {
-      const created = await createToken(label.trim());
+      const created = await createToken(label.trim(), allowEdit ? 'write' : 'read');
       const pairingUrl = `chipmunk://pair?u=${encodeURIComponent(window.location.origin)}&t=${encodeURIComponent(created.token)}`;
       issued = { token: created.token, pairingUrl, svg: qrSvg(pairingUrl, { cellSize: 4, margin: 4 }) };
       label = '';
+      allowEdit = false;
       await load();
     } catch (err) {
       error = err.message;
@@ -108,11 +110,11 @@
 
   <div class="settings-list">
     <p class="mobile-note">
-      A device token lets the Chipmunk companion app and its widgets read a budget summary from this server. It is read-only and gives access to nothing else. Create one per device and revoke it here at any time.
+      A device token lets the Chipmunk companion app and its widgets read your budget from this server. It is read-only unless you allow changes below, and gives access to nothing else. Create one per device and revoke it here at any time.
     </p>
 
     <p class="secret-warning" role="note">
-      The QR code and the token contain a secret. Anyone who has them can read your budget summary. Do not screenshot or share them.
+      The QR code and the token contain a secret. Anyone who has them can read your budget{allowEdit ? ' and change it' : ''}. Do not screenshot or share them.
     </p>
 
     <h4 class="group-label">Pair a new device</h4>
@@ -124,6 +126,11 @@
       </label>
       <button type="button" class="abt-btn create-token" disabled={!canCreate} onclick={create}>{busy ? 'Creating…' : 'Create token'}</button>
     </div>
+    <label class="allow-edit-row" for="mobile-allow-edit">
+      <input id="mobile-allow-edit" class="allow-edit" type="checkbox" bind:checked={allowEdit} disabled={atLimit} />
+      <span class="setting-desc">Allow this device to change my budget</span>
+    </label>
+    <p class="mobile-note allow-edit-note">This lets the phone categorize transactions and edit budget amounts; revoking the device removes it.</p>
     {#if atLimit}
       <p class="mobile-note">Device limit reached. Revoke a device to pair another.</p>
     {/if}
@@ -163,7 +170,7 @@
         <div class="token-row" data-token-id={t.id}>
           <span class="setting-text">
             <span class="setting-label">{t.label}</span>
-            <span class="setting-desc">Created {formatWhen(t.createdAt)} · {t.lastUsedAt ? `Last used ${formatWhen(t.lastUsedAt)}` : 'Never used'}</span>
+            <span class="setting-desc">{t.scope === 'write' ? 'Can edit' : 'Read only'} · Created {formatWhen(t.createdAt)} · {t.lastUsedAt ? `Last used ${formatWhen(t.lastUsedAt)}` : 'Never used'}</span>
           </span>
           {#if confirmingId === t.id}
             <span class="confirm-bar">
@@ -195,6 +202,17 @@
     flex-direction: column;
     gap: 4px;
     margin: 4px 0;
+  }
+
+  .allow-edit-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 4px 0 2px;
+  }
+
+  .allow-edit-note {
+    margin-bottom: 4px;
   }
 
   .action-row {

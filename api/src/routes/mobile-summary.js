@@ -2,7 +2,8 @@ const express = require('express');
 
 const { getActualClient, syncIfDue } = require('../actual-client');
 const { buildMobileSummary } = require('../mobile/summary');
-const { verifyToken, touchToken } = require('../mobile-tokens-store');
+const { touchToken } = require('../mobile-tokens-store');
+const { bearerAuth, rateLimit, resetRateLimits, READ_LIMIT } = require('../mobile/http');
 
 // GET /api/mobile/summary: the one endpoint a paired companion app can reach.
 //
@@ -18,47 +19,11 @@ const { verifyToken, touchToken } = require('../mobile-tokens-store');
 // gets the identical response, so a caller learns nothing about why. No CORS
 // headers are ever set: a browser page can't call this, only a native app.
 
-const RATE_LIMIT = 60;
-const RATE_WINDOW_MS = 60 * 1000;
 const CACHE_TTL_MS = 60 * 1000;
 
-const BEARER = /^Bearer ([A-Za-z0-9_-]+)$/i;
-
-function unauthorized(res) {
-  res.set('WWW-Authenticate', 'Bearer realm="actual-insights"');
-  res.set('Cache-Control', 'no-store');
-  res.status(401).json({ error: 'unauthorized' });
-}
-
-async function bearerAuth(req, res, next) {
-  const match = BEARER.exec(req.get('Authorization') || '');
-  const record = match ? await verifyToken(match[1]) : null;
-  if (!record) {
-    unauthorized(res);
-    return;
-  }
-  req.deviceToken = record;
-  next();
-}
-
-// Per-token sliding window. Only requests carrying a valid token are counted,
-// so garbage traffic can't use up a real device's allowance.
-const hits = new Map(); // token id -> timestamps (ms) inside the window
-
-function rateLimit(req, res, next) {
-  const now = Date.now();
-  const recent = (hits.get(req.deviceToken.id) || []).filter((t) => t > now - RATE_WINDOW_MS);
-  if (recent.length >= RATE_LIMIT) {
-    hits.set(req.deviceToken.id, recent);
-    res.set('Retry-After', String(Math.max(1, Math.ceil((recent[0] + RATE_WINDOW_MS - now) / 1000))));
-    res.set('Cache-Control', 'no-store');
-    res.status(429).json({ error: 'rate limited' });
-    return;
-  }
-  recent.push(now);
-  hits.set(req.deviceToken.id, recent);
-  next();
-}
+// Bearer auth and the shared per-token read rate limit live in ../mobile/http
+// (the v1 router uses the same ones).
+const readLimit = rateLimit('read', READ_LIMIT, 'rate limited');
 
 // One budget, one payload: computed at most once a minute no matter how many
 // devices or widgets ask. A build in flight is shared, a failed one is not
@@ -85,7 +50,7 @@ async function currentPayload() {
 
 const router = express.Router();
 
-router.get('/', bearerAuth, rateLimit, async (req, res) => {
+router.get('/', bearerAuth, readLimit, async (req, res) => {
   try {
     const payload = await currentPayload();
     // lastUsedAt is bookkeeping: never let it slow or fail a response.
@@ -101,7 +66,7 @@ router.get('/', bearerAuth, rateLimit, async (req, res) => {
 
 // Test hook: forget the rate-limit windows and the cached payload.
 function resetMobileSummaryState() {
-  hits.clear();
+  resetRateLimits();
   cached = null;
   building = null;
 }

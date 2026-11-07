@@ -32,18 +32,20 @@ async function call(path, options) {
   return response.json();
 }
 
-// -> { tokens: [{ id, label, createdAt, lastUsedAt }] }; never has secrets.
+// -> { tokens: [{ id, label, scope, createdAt, lastUsedAt }] }; never has secrets.
+// `scope` is 'read' or 'write'.
 export function listTokens() {
   return call('/api/mobile/tokens');
 }
 
-// -> { id, token, label, createdAt }. `token` is the plain secret, returned
-// only by this call.
-export function createToken(label) {
+// -> { id, token, label, scope, createdAt }. `token` is the plain secret,
+// returned only by this call. scope is 'read' (default) or 'write' (the device
+// may also change categories and budget amounts).
+export function createToken(label, scope = 'read') {
   return call('/api/mobile/tokens', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ label }),
+    body: JSON.stringify({ label, scope }),
   });
 }
 

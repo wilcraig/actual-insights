@@ -88,8 +88,10 @@ function monthSection(budgetMonth, month) {
 
 async function accountsSection(client) {
   const open = ((await client.getAccounts()) || [])
-    .filter((account) => !account.closed && !account.offbudget)
-    .sort((a, b) => String(a.name).localeCompare(String(b.name)))
+    .filter((account) => !account.closed)
+    // On-budget accounts first, then off-budget (investments, loans), each by name. Sorting before the cap
+    // means a long off-budget list can never push an on-budget account out.
+    .sort((a, b) => Boolean(a.offbudget) - Boolean(b.offbudget) || String(a.name).localeCompare(String(b.name)))
     .slice(0, MAX_ACCOUNTS);
   return Promise.all(
     open.map(async (account) => {
@@ -100,7 +102,7 @@ async function accountsSection(client) {
       } catch {
         balance = null;
       }
-      return { id: clip(account.id), name: clip(account.name), balance, onBudget: true };
+      return { id: clip(account.id), name: clip(account.name), balance, onBudget: !account.offbudget };
     })
   );
 }

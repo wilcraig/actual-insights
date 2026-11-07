@@ -50,7 +50,8 @@ test('POST creates a token and returns the plain secret once, uncached', async (
     expect(res.status).toBe(201);
     expect(res.headers.get('cache-control')).toBe('no-store');
     const body = await res.json();
-    expect(Object.keys(body).sort()).toEqual(['createdAt', 'id', 'label', 'token']);
+    expect(Object.keys(body).sort()).toEqual(['createdAt', 'id', 'label', 'scope', 'token']);
+    expect(body.scope).toBe('read');
     expect(body.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(body.label).toBe('Ann phone');
   });
@@ -63,7 +64,7 @@ test('GET lists tokens without any secret, and the plain token is not on disk', 
     expect(res.status).toBe(200);
     const text = await res.text();
     expect(text).not.toContain(token);
-    expect(JSON.parse(text)).toEqual({ tokens: [{ id, label: 'phone', createdAt: expect.any(String), lastUsedAt: null }] });
+    expect(JSON.parse(text)).toEqual({ tokens: [{ id, label: 'phone', scope: 'read', createdAt: expect.any(String), lastUsedAt: null }] });
     expect(fs.readFileSync(path.join(DATA_DIR, 'mobile-tokens.json'), 'utf8')).not.toContain(token);
   });
 });
@@ -99,5 +100,19 @@ test('a device token cannot manage device tokens, in either header', async () =>
       expect((await fetch(`${base}/api/mobile/tokens`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: '{"label":"x"}' })).status).toBe(401);
       expect((await fetch(`${base}/api/mobile/tokens/x`, { method: 'DELETE', headers })).status).toBe(401);
     }
+  });
+});
+
+test('POST accepts scope write, lists it, and rejects any other scope with a 400', async () => {
+  await withServer(async (base) => {
+    const res = await post(base, { label: 'edits', scope: 'write' });
+    expect(res.status).toBe(201);
+    expect((await res.json()).scope).toBe('write');
+    expect((await post(base, { label: 'explicit', scope: 'read' })).status).toBe(201);
+    for (const scope of ['admin', 'WRITE', '', null, 1, true, ['write'], { a: 1 }]) {
+      expect((await post(base, { label: 'bad', scope })).status).toBe(400);
+    }
+    const list = (await (await fetch(`${base}/api/mobile/tokens`, { headers: SESSION_HEADERS })).json()).tokens;
+    expect(list.map((t) => [t.label, t.scope])).toEqual([['edits', 'write'], ['explicit', 'read']]);
   });
 });

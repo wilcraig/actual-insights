@@ -162,7 +162,7 @@ describe('a device token is useless everywhere else', () => {
     for (const known of ['/api/accounts', '/api/goals', '/api/channels', '/api/forecast', '/api/summaries', '/api/mobile/tokens']) expect(mounts).toContain(known);
   });
 
-  test.each(mounts.filter((m) => m !== '/api/mobile/summary'))('%s rejects a device token in either header with 401', async (mount) => {
+  test.each(mounts.filter((m) => m !== '/api/mobile/summary' && m !== '/api/mobile/v1'))('%s rejects a device token in either header with 401', async (mount) => {
     const { token } = await newToken();
     await withServer(async (base) => {
       for (const headers of [{ Authorization: `Bearer ${token}` }, { 'X-ACTUAL-TOKEN': token }, { Authorization: `Bearer ${token}`, 'X-ACTUAL-TOKEN': token }]) {

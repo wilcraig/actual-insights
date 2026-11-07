@@ -1,0 +1,321 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://chipmunkbudget.app/contracts/native-v1.schema.json",
+  "title": "Chipmunk native client API v1 (served by Actual Insights under /api/mobile/v1)",
+  "description": "Every response body of the native client API. Money is integer minor units (cents). Dates are YYYY-MM-DD, months YYYY-MM. Strings are clipped by the server. Unknown properties are a contract violation (additionalProperties false everywhere) so a client can decode strictly.",
+  "definitions": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+    "money": { "type": "integer", "minimum": -10000000000000, "maximum": 10000000000000 },
+    "month": { "type": "string", "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$" },
+    "date": { "type": "string", "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$" },
+    "name": { "type": "string", "maxLength": 200 },
+    "note": { "type": "string", "maxLength": 500 },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "scope": { "type": "string", "enum": ["read", "write"] },
+
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["error"],
+      "properties": {
+        "error": {
+          "type": "string",
+          "enum": ["unauthorized", "read_only", "rate_limited", "bad_request", "not_found", "conflict", "internal"]
+        }
+      }
+    },
+
+    "me": {
+      "description": "GET /api/mobile/v1/me. Which scope this device token has, so the app can hide editing it cannot do.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "scope", "currency"],
+      "properties": {
+        "schema": { "const": 1 },
+        "scope": { "$ref": "#/definitions/scope" },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }
+      }
+    },
+
+    "account": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "balance", "onBudget"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" },
+        "name": { "$ref": "#/definitions/name" },
+        "balance": { "oneOf": [{ "$ref": "#/definitions/money" }, { "type": "null" }] },
+        "onBudget": { "type": "boolean" }
+      }
+    },
+    "accountsResponse": {
+      "description": "GET /accounts. Open accounts, on-budget first then off-budget, each by name, at most 100.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "generatedAt", "accounts"],
+      "properties": {
+        "schema": { "const": 1 },
+        "generatedAt": { "$ref": "#/definitions/generatedAt" },
+        "accounts": { "type": "array", "maxItems": 100, "items": { "$ref": "#/definitions/account" } }
+      }
+    },
+
+    "categoryRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": { "id": { "$ref": "#/definitions/id" }, "name": { "$ref": "#/definitions/name" } }
+    },
+    "transaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "date", "accountId", "accountName", "payee", "amount", "category", "notes", "cleared", "transfer", "split"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" },
+        "date": { "$ref": "#/definitions/date" },
+        "accountId": { "$ref": "#/definitions/id" },
+        "accountName": { "$ref": "#/definitions/name" },
+        "payee": { "oneOf": [{ "$ref": "#/definitions/name" }, { "type": "null" }] },
+        "amount": { "$ref": "#/definitions/money" },
+        "category": { "oneOf": [{ "$ref": "#/definitions/categoryRef" }, { "type": "null" }] },
+        "notes": { "oneOf": [{ "$ref": "#/definitions/note" }, { "type": "null" }] },
+        "cleared": { "type": "boolean" },
+        "transfer": { "type": "boolean", "description": "Moves money between two of the user's accounts. Has no category and cannot be categorized." },
+        "split": { "type": "boolean", "description": "Parent of a split. Cannot be categorized here." }
+      }
+    },
+    "transactionsResponse": {
+      "description": "GET /transactions?account=<id>&uncategorized=1&limit=<1..100, default 50>&cursor=<opaque>. Newest first. account omitted = all accounts. uncategorized=1 keeps only expense or income rows with no category that are not transfers and not split parents. Off-budget accounts are never in the uncategorized view.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "generatedAt", "transactions", "nextCursor"],
+      "properties": {
+        "schema": { "const": 1 },
+        "generatedAt": { "$ref": "#/definitions/generatedAt" },
+        "transactions": { "type": "array", "maxItems": 100, "items": { "$ref": "#/definitions/transaction" } },
+        "nextCursor": { "oneOf": [{ "type": "string", "pattern": "^[A-Za-z0-9_-]{1,256}$" }, { "type": "null" }] },
+        "uncategorizedCount": { "type": "integer", "minimum": 0, "maximum": 1000000, "description": "Present on the first page (no cursor) only: how many rows uncategorized=1 would match for the same account filter." }
+      }
+    },
+
+    "categoryGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "isIncome", "categories"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" },
+        "name": { "$ref": "#/definitions/name" },
+        "isIncome": { "type": "boolean" },
+        "categories": { "type": "array", "maxItems": 200, "items": { "$ref": "#/definitions/categoryRef" } }
+      }
+    },
+    "categoriesResponse": {
+      "description": "GET /categories. Visible groups and categories in Actual's order, for pickers. Hidden ones are left out.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "generatedAt", "groups"],
+      "properties": {
+        "schema": { "const": 1 },
+        "generatedAt": { "$ref": "#/definitions/generatedAt" },
+        "groups": { "type": "array", "maxItems": 100, "items": { "$ref": "#/definitions/categoryGroup" } }
+      }
+    },
+
+    "budgetCategory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "budgeted", "spent", "balance", "carryover"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" },
+        "name": { "$ref": "#/definitions/name" },
+        "budgeted": { "$ref": "#/definitions/money" },
+        "spent": { "$ref": "#/definitions/money", "description": "Negative for money out, as Actual reports it." },
+        "balance": { "$ref": "#/definitions/money" },
+        "carryover": { "type": "boolean" }
+      }
+    },
+    "budgetGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "budgeted", "spent", "balance", "categories"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" },
+        "name": { "$ref": "#/definitions/name" },
+        "budgeted": { "$ref": "#/definitions/money" },
+        "spent": { "$ref": "#/definitions/money" },
+        "balance": { "$ref": "#/definitions/money" },
+        "categories": { "type": "array", "maxItems": 200, "items": { "$ref": "#/definitions/budgetCategory" } }
+      }
+    },
+    "budgetTotals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["toBudget", "budgeted", "spent", "balance", "income"],
+      "properties": {
+        "toBudget": { "oneOf": [{ "$ref": "#/definitions/money" }, { "type": "null" }], "description": "Null when Actual's API does not report it for this budget." },
+        "budgeted": { "$ref": "#/definitions/money" },
+        "spent": { "$ref": "#/definitions/money" },
+        "balance": { "$ref": "#/definitions/money" },
+        "income": { "$ref": "#/definitions/money" }
+      }
+    },
+    "budgetMonthResponse": {
+      "description": "GET /budget/<YYYY-MM>. Expense groups only (income groups are left out), hidden ones left out.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "generatedAt", "month", "totals", "groups"],
+      "properties": {
+        "schema": { "const": 1 },
+        "generatedAt": { "$ref": "#/definitions/generatedAt" },
+        "month": { "$ref": "#/definitions/month" },
+        "totals": { "$ref": "#/definitions/budgetTotals" },
+        "groups": { "type": "array", "maxItems": 100, "items": { "$ref": "#/definitions/budgetGroup" } }
+      }
+    },
+
+    "transactionUpdateRequest": {
+      "description": "PATCH /transactions/<id>. Write scope. Sets or clears the category of one non-transfer, non-split transaction.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["category"],
+      "properties": { "category": { "oneOf": [{ "$ref": "#/definitions/id" }, { "type": "null" }] } }
+    },
+    "transactionResponse": {
+      "description": "Response to PATCH /transactions/<id>: the transaction after the change.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "transaction"],
+      "properties": { "schema": { "const": 1 }, "transaction": { "$ref": "#/definitions/transaction" } }
+    },
+
+    "budgetAmountRequest": {
+      "description": "PUT /budget/<YYYY-MM>/categories/<id>. Write scope. budgeted is cents, whole-number, within 0..1e12.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["budgeted"],
+      "properties": { "budgeted": { "type": "integer", "minimum": 0, "maximum": 1000000000000 } }
+    },
+    "budgetMoveRequest": {
+      "description": "POST /budget/<YYYY-MM>/move. Write scope. Moves amount (cents, > 0) of budgeted money from one expense category to another in that month: from.budgeted -= amount, to.budgeted += amount.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to", "amount"],
+      "properties": {
+        "from": { "$ref": "#/definitions/id" },
+        "to": { "$ref": "#/definitions/id" },
+        "amount": { "type": "integer", "minimum": 1, "maximum": 1000000000000 }
+      }
+    },
+    "budgetChangeResponse": {
+      "description": "Response to the two budget writes: the changed categories after the write (one for PUT, two for move: from then to) and the month totals.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "month", "categories", "totals"],
+      "properties": {
+        "schema": { "const": 1 },
+        "month": { "$ref": "#/definitions/month" },
+        "categories": { "type": "array", "minItems": 1, "maxItems": 2, "items": { "$ref": "#/definitions/budgetCategory" } },
+        "totals": { "$ref": "#/definitions/budgetTotals" }
+      }
+    },
+
+    "point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "value"],
+      "properties": { "label": { "$ref": "#/definitions/name" }, "value": { "type": "number", "minimum": -10000000000000, "maximum": 10000000000000 } }
+    },
+    "reportBase": {
+      "type": "object",
+      "required": ["id", "kind", "title"],
+      "properties": {
+        "id": { "$ref": "#/definitions/id" },
+        "kind": { "type": "string" },
+        "title": { "$ref": "#/definitions/name" },
+        "subtitle": { "$ref": "#/definitions/name" }
+      }
+    },
+    "reportCard": {
+      "description": "One dashboard card, already computed and shaped for a single column. The app renders each kind once; unknown kinds are shown as 'unsupported'.",
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false, "required": ["id", "kind", "title", "text"],
+          "properties": { "id": { "$ref": "#/definitions/id" }, "kind": { "const": "text" }, "title": { "$ref": "#/definitions/name" }, "subtitle": { "$ref": "#/definitions/name" }, "text": { "type": "string", "maxLength": 4000 } }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["id", "kind", "title", "value", "format"],
+          "properties": {
+            "id": { "$ref": "#/definitions/id" }, "kind": { "const": "stat" }, "title": { "$ref": "#/definitions/name" }, "subtitle": { "$ref": "#/definitions/name" },
+            "value": { "type": "number", "minimum": -10000000000000, "maximum": 10000000000000 },
+            "format": { "type": "string", "enum": ["money", "number", "percent"] },
+            "compare": { "type": "object", "additionalProperties": false, "required": ["value", "label"], "properties": { "value": { "type": "number" }, "label": { "$ref": "#/definitions/name" } } }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["id", "kind", "title", "chart", "format", "points"],
+          "properties": {
+            "id": { "$ref": "#/definitions/id" }, "kind": { "const": "series" }, "title": { "$ref": "#/definitions/name" }, "subtitle": { "$ref": "#/definitions/name" },
+            "chart": { "type": "string", "enum": ["bar", "line", "area"] },
+            "format": { "type": "string", "enum": ["money", "number", "percent"] },
+            "points": { "type": "array", "maxItems": 400, "items": { "$ref": "#/definitions/point" } }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["id", "kind", "title", "format", "items", "total"],
+          "properties": {
+            "id": { "$ref": "#/definitions/id" }, "kind": { "const": "breakdown" }, "title": { "$ref": "#/definitions/name" }, "subtitle": { "$ref": "#/definitions/name" },
+            "format": { "type": "string", "enum": ["money", "number", "percent"] },
+            "items": { "type": "array", "maxItems": 60, "items": { "$ref": "#/definitions/point" } },
+            "total": { "type": "number", "minimum": -10000000000000, "maximum": 10000000000000 }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["id", "kind", "title", "format", "items"],
+          "properties": {
+            "id": { "$ref": "#/definitions/id" }, "kind": { "const": "progress" }, "title": { "$ref": "#/definitions/name" }, "subtitle": { "$ref": "#/definitions/name" },
+            "format": { "type": "string", "enum": ["money", "number", "percent"] },
+            "items": {
+              "type": "array", "maxItems": 60,
+              "items": { "type": "object", "additionalProperties": false, "required": ["label", "current", "target"], "properties": { "label": { "$ref": "#/definitions/name" }, "current": { "type": "number" }, "target": { "type": "number" } } }
+            }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["id", "kind", "title", "rows"],
+          "properties": {
+            "id": { "$ref": "#/definitions/id" }, "kind": { "const": "list" }, "title": { "$ref": "#/definitions/name" }, "subtitle": { "$ref": "#/definitions/name" },
+            "rows": {
+              "type": "array", "maxItems": 60,
+              "items": { "type": "object", "additionalProperties": false, "required": ["title", "value"], "properties": { "title": { "$ref": "#/definitions/name" }, "subtitle": { "$ref": "#/definitions/name" }, "date": { "$ref": "#/definitions/date" }, "value": { "$ref": "#/definitions/money" } } }
+            }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["id", "kind", "title", "days"],
+          "properties": {
+            "id": { "$ref": "#/definitions/id" }, "kind": { "const": "calendar" }, "title": { "$ref": "#/definitions/name" }, "subtitle": { "$ref": "#/definitions/name" },
+            "days": {
+              "type": "array", "maxItems": 62,
+              "items": { "type": "object", "additionalProperties": false, "required": ["date", "value"], "properties": { "date": { "$ref": "#/definitions/date" }, "value": { "$ref": "#/definitions/money" } } }
+            }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["id", "kind", "title"],
+          "properties": { "id": { "$ref": "#/definitions/id" }, "kind": { "const": "unsupported" }, "title": { "$ref": "#/definitions/name" }, "subtitle": { "$ref": "#/definitions/name" } }
+        }
+      ]
+    },
+    "reportsResponse": {
+      "description": "GET /reports. The dashboard's cards in reading order (top to bottom, then left to right), at most 40. A card whose data could not be computed is sent as kind 'unsupported' so one bad card never hides the rest.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "generatedAt", "cards"],
+      "properties": {
+        "schema": { "const": 1 },
+        "generatedAt": { "$ref": "#/definitions/generatedAt" },
+        "cards": { "type": "array", "maxItems": 40, "items": { "$ref": "#/definitions/reportCard" } }
+      }
+    }
+  }
+}
