@@ -95,6 +95,7 @@ function makeFakeActual(overrides = {}) {
     const actual = value(row, k);
     if (v !== null && typeof v === 'object') {
       if ('$lt' in v) return actual < v.$lt;
+      if ('$ne' in v) return actual !== v.$ne;
       throw new Error('fake AQL: unsupported operator');
     }
     return actual === v;

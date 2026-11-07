@@ -586,6 +586,25 @@ recovered, only replaced.
   doesn't have the mobile summary" (an older Actual Insights, or a login
   page in front of it, answers without the header).
 
+### Hiding accounts from the phone app
+
+On the Insights page, Mobile app tab, "Hidden accounts" lists every account
+(closed and off-budget ones too); the checked ones are hidden from the native
+app completely. The list is stored in `mobile-hidden-accounts.json` in the data
+directory (a missing or damaged file hides nothing) and is managed with
+`GET`/`PUT /api/mobile/hidden-accounts` (`{"hiddenIds": [...]}`), which need an
+Actual session; device tokens cannot reach them.
+
+A hidden account is gone from everything the device-token API serves: the
+accounts list, transactions (lists, counts, detail, edits and splits answer
+`404 not_found`), spending details, report cards that add up accounts or
+transactions, and the legacy `/api/mobile/summary` accounts and goals. A
+transfer from a visible account to a hidden one stays in the visible account's
+list, with the other side shown as "Other account". **Budget numbers are
+not changed:** the budget month (budgeted, spent, balance, to budget) is
+Actual's own computation and still includes the hidden accounts' transactions.
+Hiding is independent of closed and off-budget.
+
 ### Rotating or revoking
 
 There can be up to 10 paired devices. To **rotate**, create a new token for

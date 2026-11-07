@@ -1,4 +1,4 @@
-const { getActualClient } = require('../../actual-client');
+const { scopedClient: getActualClient } = require('./hidden');
 const { MAX_BUDGETED, MAX_MONEY, MAX_NOTE, badRequest, notFound, isHidden, isIncome, monthWithinWindow } = require('./common');
 const { readTransactionRow, buildTransactionDetail, budgetCategory, budgetTotals } = require('./read');
 const { appendAudit } = require('./audit');

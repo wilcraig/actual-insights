@@ -1,6 +1,7 @@
 const express = require('express');
 
-const { getActualClient, syncIfDue } = require('../actual-client');
+const { syncIfDue } = require('../actual-client');
+const { scopedClient } = require('../mobile/v1/hidden');
 const { touchToken } = require('../mobile-tokens-store');
 const { bearerAuth, rateLimit, resetRateLimits, READ_LIMIT, WRITE_LIMIT } = require('../mobile/http');
 const { createReadCache } = require('../mobile/v1/cache');
@@ -80,7 +81,7 @@ function read(handler) {
     try {
       const { key, build, respond } = handler(req);
       const payload = await cache.get(key, async () => {
-        const client = await getActualClient();
+        const client = await scopedClient();
         await syncIfDue(client);
         return build(client);
       });
@@ -128,7 +129,14 @@ router.get('/transactions', readLimit, read((req) => {
     cursor,
   };
   const key = `transactions|${params.account ?? ''}|${params.uncategorized ? 1 : 0}|${params.group ?? ''}|${params.category ?? ''}|${params.limit}|${params.cursor ?? ''}`;
-  return { key, build: (client) => buildTransactions(client, params) };
+  return {
+    key,
+    build: (client) => {
+      // An account the owner hid does not exist as far as the app can tell.
+      if (params.account && client.hiddenIds && client.hiddenIds.has(params.account)) throw notFound();
+      return buildTransactions(client, params);
+    },
+  };
 }));
 
 router.get('/categories', readLimit, read((req) => {
@@ -341,3 +349,5 @@ function resetMobileV1State() {
 
 module.exports = router;
 module.exports.resetMobileV1State = resetMobileV1State;
+// The hidden-accounts setting changed: every cached read is out of date.
+module.exports.clearMobileV1Cache = () => cache.clear();

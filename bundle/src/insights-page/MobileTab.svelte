@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { listTokens, createToken, revokeToken } from './mobile-api';
+  import { listTokens, createToken, revokeToken, listHiddenAccounts, saveHiddenAccounts } from './mobile-api';
   import { qrSvg } from './qr';
 
   // The Insights page's Mobile app tab: pair the Chipmunk companion app by
@@ -26,7 +26,51 @@
   let atLimit = $derived(tokens.length >= MAX_DEVICES);
   let canCreate = $derived(!busy && !atLimit && label.trim() !== '');
 
+  // Hidden accounts: a checklist of every account; checked = hidden.
+  let accounts = $state([]);
+  let hiddenSet = $state(new Set());
+  let accountsLoaded = $state(false);
+  let accountsError = $state(null);
+  let savingAccounts = $state(false);
+  let accountsSaved = $state(false);
+
+  async function loadAccounts() {
+    accountsError = null;
+    try {
+      accounts = (await listHiddenAccounts()).accounts || [];
+      hiddenSet = new Set(accounts.filter((a) => a.hidden).map((a) => a.id));
+    } catch (err) {
+      accountsError = err.message;
+    } finally {
+      accountsLoaded = true;
+    }
+  }
+
+  function toggleHidden(id, checked) {
+    const next = new Set(hiddenSet);
+    if (checked) next.add(id);
+    else next.delete(id);
+    hiddenSet = next;
+    accountsSaved = false;
+  }
+
+  async function saveAccounts() {
+    savingAccounts = true;
+    accountsError = null;
+    accountsSaved = false;
+    try {
+      accounts = (await saveHiddenAccounts([...hiddenSet])).accounts || [];
+      hiddenSet = new Set(accounts.filter((a) => a.hidden).map((a) => a.id));
+      accountsSaved = true;
+    } catch (err) {
+      accountsError = err.message;
+    } finally {
+      savingAccounts = false;
+    }
+  }
+
   async function load() {
+    loadAccounts();
     loadError = null;
     try {
       tokens = (await listTokens()).tokens || [];
@@ -154,6 +198,30 @@
           <button type="button" class="abt-btn done" onclick={dismiss}>Done</button>
         </div>
       </div>
+    {/if}
+
+    <h4 class="group-label">Hidden accounts</h4>
+    <p class="mobile-note hidden-note">Hidden accounts disappear from the phone app: the accounts list, transactions, spending details and report totals. Your budget numbers still come from Actual itself.</p>
+    {#if accountsError}
+      <p class="mobile-error hidden-error" role="alert">{accountsError}</p>
+    {/if}
+    {#if !accountsLoaded}
+      <p class="mobile-note">Loading accounts…</p>
+    {:else if accounts.length > 0}
+      <div class="hidden-list">
+        {#each accounts as a (a.id)}
+          <label class="allow-edit-row hidden-row" data-account-id={a.id}>
+            <input type="checkbox" class="hide-account" checked={hiddenSet.has(a.id)} onchange={(e) => toggleHidden(a.id, e.currentTarget.checked)} />
+            <span class="setting-desc">{a.name}{a.closed ? ' (closed)' : ''}{a.offBudget ? ' (off budget)' : ''}</span>
+          </label>
+        {/each}
+      </div>
+      <div class="action-row">
+        <button type="button" class="abt-btn save-hidden" disabled={savingAccounts} onclick={saveAccounts}>{savingAccounts ? 'Saving…' : 'Save'}</button>
+        {#if accountsSaved}<span class="mobile-note saved-status" role="status">Saved.</span>{/if}
+      </div>
+    {:else if !accountsError}
+      <p class="mobile-note">No accounts found.</p>
     {/if}
 
     <h4 class="group-label">Paired devices</h4>
