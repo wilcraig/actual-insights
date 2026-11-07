@@ -130,7 +130,32 @@ function makeFakeActual(overrides = {}) {
     }),
     setBudgetAmount: jest.fn(async (month, id, amount) => { state.calls.push(['setBudgetAmount', month, id, amount]); monthLines(month)[id] = amount; }),
     batchBudgetUpdates: jest.fn(async (fn) => { state.calls.push(['batch']); await fn(); }),
-    updateTransaction: jest.fn(async (id, fields) => { state.calls.push(['updateTransaction', id, fields]); Object.assign(state.transactions.find((t) => t.id === id), fields); }),
+    // Mirrors what @actual-app/api 26.10 does (checked against a real budget):
+    // `subtransactions` replaces every child of the parent (new ids, the
+    // parent's account/date/payee/cleared, the parent's category reads null
+    // while split but is kept underneath) and `is_parent: false` with no lines
+    // un-splits it, bringing that old category back.
+    updateTransaction: jest.fn(async (id, fields) => {
+      state.calls.push(['updateTransaction', id, fields]);
+      const row = state.transactions.find((t) => t.id === id);
+      const { subtransactions, ...rest } = fields;
+      if (subtransactions) {
+        state.transactions = state.transactions.filter((t) => t.parent_id !== id);
+        if (rest.is_parent === false) {
+          row.is_parent = false;
+          if (!row.is_parent && '_kept' in row) { row.category = row._kept; delete row._kept; }
+        } else {
+          if (!row.is_parent) { row._kept = row.category; row.category = null; }
+          row.is_parent = true;
+          for (const line of subtransactions) {
+            state.nextChild = (state.nextChild || 0) + 1;
+            state.transactions.push({ id: `${id}-n${state.nextChild}`, date: row.date, account: row.account, payee: row.payee, cleared: row.cleared, is_child: true, parent_id: id, ...line });
+          }
+        }
+        delete rest.is_parent;
+      }
+      Object.assign(row, rest);
+    }),
     aqlQuery: jest.fn(async (query) => {
       const s = query.serialize();
       if (s.table === 'preferences') return { data: [{ id: 'defaultCurrencyCode', value: state.currency }] };

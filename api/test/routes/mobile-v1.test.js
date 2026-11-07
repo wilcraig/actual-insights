@@ -96,7 +96,7 @@ describe('authentication', () => {
     await store.revokeToken(revoked.id, DATA_DIR);
     await withServer(async (base) => {
       const headersList = [{}, { Authorization: '' }, { Authorization: 'Bearer garbage' }, { Authorization: `Basic ${token}` }, { Authorization: `Bearer ${revoked.token}` }, { Authorization: `Bearer ${token.slice(0, -1)}` }, { 'X-ACTUAL-TOKEN': 'valid' }];
-      const endpoints = [['GET', '/me'], ['GET', '/accounts'], ['GET', '/transactions'], ['GET', '/categories'], ['GET', '/budget/2026-11'], ['GET', '/reports'], ['PATCH', '/transactions/t-02'], ['GET', '/report-list'], ['PATCH', '/transactions/t-02'], ['POST', '/transactions/t-02'], ['PUT', '/budget/2026-11/categories/c-groc'], ['POST', '/budget/2026-11/move'], ['GET', '/nothing']];
+      const endpoints = [['GET', '/me'], ['GET', '/accounts'], ['GET', '/transactions'], ['GET', '/categories'], ['GET', '/budget/2026-11'], ['GET', '/reports'], ['PATCH', '/transactions/t-02'], ['GET', '/report-list'], ['PATCH', '/transactions/t-02'], ['POST', '/transactions/t-02'], ['PUT', '/budget/2026-11/categories/c-groc'], ['POST', '/budget/2026-11/move'], ['PUT', '/transactions/t-02/splits'], ['DELETE', '/transactions/t-05/splits'], ['GET', '/nothing']];
       const seen = [];
       for (const [method, url] of endpoints) {
         for (const headers of headersList) {
@@ -569,6 +569,8 @@ describe('write scope', () => {
         ['PUT', '/budget/2026-11/categories/c-groc', { budgeted: 1 }],
         ['POST', '/budget/2026-11/move', { from: 'c-fuel', to: 'c-groc', amount: 1 }],
         ['PATCH', '/transactions/t-02', 'not even json'],
+        ['PUT', '/transactions/t-02/splits', examples.transactionSplitRequest],
+        ['DELETE', '/transactions/t-05/splits'],
       ];
       for (const [method, url, body, extra] of attempts) {
         const res = await call(base, token, method, url, body, extra);
@@ -721,6 +723,201 @@ describe('PATCH /transactions/:id', () => {
     await withServer(async (base) => {
       expect((await call(base, token, 'PATCH', '/transactions/t-02', { category: 'c-groc' })).status).toBe(200);
       expect(console.error).toHaveBeenCalledWith('mobile write: sync failed:', 'ECONNRESET');
+    });
+  });
+});
+
+describe('PUT and DELETE /transactions/:id/splits', () => {
+  const line = (category, amount, notes = null) => ({ category, amount, notes });
+  const put = (base, token, id, body) => call(base, token, 'PUT', `/transactions/${id}/splits`, body);
+  const del = (base, token, id) => call(base, token, 'DELETE', `/transactions/${id}/splits`);
+
+  test('the contract example validates', () => {
+    expectValid('transactionSplitRequest', examples.transactionSplitRequest);
+    expect(isValid('transactionSplitRequest', { splits: [line('c-groc', -1, null)] })).toBe(false);
+  });
+
+  test('splits a plain transaction: detail in written order, parent keeps amount and loses its category, audited, synced', async () => {
+    const { token, id } = await newToken('write');
+    await withServer(async (base) => {
+      const body = { splits: [line('c-fuel', -1399, 'gas'), line('c-groc', -1000)] };
+      const res = await put(base, token, 't-02', body);
+      expect(res.status).toBe(200);
+      const { transaction } = await json(res, 'transactionDetailResponse');
+      expect(transaction).toMatchObject({ id: 't-02', amount: -2399, split: true, category: null, categoryGroup: null });
+      expect(transaction.splits).toEqual([
+        { category: { id: 'c-fuel', name: 'Fuel' }, amount: -1399, notes: 'gas' },
+        { category: { id: 'c-groc', name: 'Groceries' }, amount: -1000, notes: null },
+      ]);
+      const [, fields] = client.updateTransaction.mock.calls[0];
+      expect(client.updateTransaction).toHaveBeenCalledTimes(1);
+      expect(fields.subtransactions.map((l) => l.sort_order)).toEqual([-1, -2]);
+      const children = client.state.transactions.filter((t) => t.parent_id === 't-02');
+      expect(children.map((c) => [c.account, c.date, c.payee])).toEqual([['a-chk', '2026-11-10', 'p-hw'], ['a-chk', '2026-11-10', 'p-hw']]);
+      expect(client.sync).toHaveBeenCalledTimes(1);
+      expect(auditLines()).toEqual([{ time: NOW.toISOString(), tokenId: id, op: 'transaction.split', ids: { transaction: 't-02' }, amount: -2399, before: { category: null, splits: [] }, after: { splits: [{ category: 'c-fuel', amount: -1399, notesLength: 3 }, { category: 'c-groc', amount: -1000, notesLength: 0 }] } }]);
+      expect(fs.readFileSync(AUDIT, 'utf8')).not.toContain('gas');
+      // The list now says Split too (cache was cleared).
+      const list = await json(await get(base, token, '/transactions'), 'transactionsResponse');
+      expect(list.transactions.find((t) => t.id === 't-02').split).toBe(true);
+    });
+  });
+
+  test('a second PUT replaces the lines (no duplicates), repeated categories are fine, empty notes become null', async () => {
+    const { token } = await newToken('write');
+    await withServer(async (base) => {
+      await put(base, token, 't-02', { splits: [line('c-fuel', -1399), line('c-groc', -1000)] });
+      const res = await put(base, token, 't-02', { splits: [line('c-groc', -800, ''), line('c-groc', -800, 'b'), line('c-fuel', -799, null)] });
+      expect(res.status).toBe(200);
+      const { transaction } = await json(res, 'transactionDetailResponse');
+      expect(transaction.splits.map((s) => [s.category.id, s.amount, s.notes])).toEqual([['c-groc', -800, null], ['c-groc', -800, 'b'], ['c-fuel', -799, null]]);
+      expect(client.state.transactions.filter((t) => t.parent_id === 't-02')).toHaveLength(3);
+      const lines = auditLines();
+      expect(lines[1].before.splits).toHaveLength(2);
+      expect(lines[1].after.splits).toHaveLength(3);
+      // The existing split can be rewritten too.
+      const again = await put(base, token, 't-05', { splits: [line('c-fuel', -3000, 'x'), line('c-groc', -2000)] });
+      expect(again.status).toBe(200);
+      expect(auditLines()[2].before.splits).toEqual([{ category: 'c-groc', amount: -2500, notesLength: 4 }, { category: null, amount: -2500, notesLength: 0 }]);
+    });
+  });
+
+  test('positive (income-sign) transactions split with positive lines', async () => {
+    const { token } = await newToken('write');
+    client.state.transactions.push({ id: 't-pos', date: '2026-11-04', account: 'a-chk', payee: 'p-grocer', category: null, amount: 3000, notes: null, cleared: true });
+    await withServer(async (base) => {
+      expect((await put(base, token, 't-pos', { splits: [line('c-groc', 1000), line('c-fuel', 2000)] })).status).toBe(200);
+      expect((await put(base, token, 't-pos', { splits: [line('c-groc', 4000), line('c-fuel', -1000)] })).status).toBe(400);
+    });
+  });
+
+  test('every refusal is a 400 (404 for unknown ids) and changes nothing', async () => {
+    const { token } = await newToken('write');
+    const ok = [line('c-groc', -1200), line('c-fuel', -1199)]; // t-02 is -2399
+    const many = (n, total) => Array.from({ length: n }, (_, i) => line('c-groc', i === 0 ? total + (n - 1) : -1));
+    await withServer(async (base) => {
+      const cases = [
+        ['t-04', ok, 400], // transfer
+        ['t-11', [line('c-groc', -800), line('c-fuel', -700)], 400], // reconciled
+        ['t-08', [line('c-groc', -400), line('c-fuel', -400)], 400], // closed account
+        ['t-05c', ok, 404], // split child
+        ['t-06', ok, 404], // tombstoned
+        ['t-nope', ok, 404],
+        ['bad%20id', ok, 400],
+        ['t-02', [line('c-groc', -2399)], 400], // one line
+        ['t-02', [], 400],
+        ['t-02', many(51, -2399), 400], // 51 lines
+        ['t-02', [line('c-groc', -1200), line('c-fuel', -1000)], 400], // sum short
+        ['t-02', [line('c-groc', -1200), line('c-fuel', -1300)], 400], // sum over
+        ['t-02', [line('c-groc', 1200), line('c-fuel', -3599)], 400], // wrong sign on a line
+        ['t-02', [line('c-groc', 1200), line('c-fuel', 1199)], 400], // all wrong sign
+        ['t-02', [line('c-groc', 0), line('c-fuel', -2399), line('c-fuel', 0)], 400], // zero amounts
+        ['t-02', [line('c-groc', -1200.5), line('c-fuel', -1198.5)], 400], // non-integer
+        ['t-02', [line('c-groc', '-1200'), line('c-fuel', -1199)], 400],
+        ['t-02', [line('c-groc', -1200), line('c-nope', -1199)], 400], // unknown category
+        ['t-02', [line('c-groc', -1200), line('c-hid', -1199)], 400], // hidden
+        ['t-02', [line('c-groc', -1200), line('c-gone', -1199)], 400], // hidden group
+        ['t-02', [line('c-groc', -1200), line('c-pay', -1199)], 400], // income
+        ['t-02', [line('c-groc', -1200), line(null, -1199)], 400],
+        ['t-02', [line('c-groc', -1200), line('bad id', -1199)], 400],
+        ['t-02', [line('c-groc', -1200), line('c-fuel', -1199, 'x'.repeat(501))], 400],
+        ['t-02', [line('c-groc', -1200), line('c-fuel', -1199, 7)], 400],
+        ['t-02', [line('c-groc', -1200), { category: 'c-fuel', amount: -1199 }], 400], // notes missing
+        ['t-02', [line('c-groc', -1200), { ...line('c-fuel', -1199), extra: 1 }], 400],
+        ['t-02', [line('c-groc', -1200), 'x'], 400],
+        ['t-02', [line('c-groc', -1200), null], 400],
+      ];
+      for (const [id, splits, status] of cases) {
+        require('../../src/routes/mobile-v1').resetMobileV1State();
+        const res = await put(base, token, id, { splits });
+        expect([id, JSON.stringify(splits).slice(0, 80), res.status]).toEqual([id, JSON.stringify(splits).slice(0, 80), status]);
+        expect(JSON.parse(await res.text())).toEqual({ error: status === 404 ? 'not_found' : 'bad_request' });
+      }
+      const bodies = [{}, { splits: ok, extra: 1 }, { splits: 'x' }, { splits: null }, [], 'null', '{broken', { splits: ok.concat([]), other: true }];
+      for (const body of bodies) {
+        const res = await put(base, token, 't-02', body);
+        expect([JSON.stringify(body), res.status]).toEqual([JSON.stringify(body), 400]);
+        expect(await res.text()).toBe('{"error":"bad_request"}');
+      }
+      expect((await put(base, token, 't-02', undefined)).status).toBe(400);
+      expect(client.updateTransaction).not.toHaveBeenCalled();
+      expect(client.sync).not.toHaveBeenCalled();
+      expect(auditLines()).toEqual([]);
+    });
+  });
+
+  test('the response never echoes input on a refusal', async () => {
+    const { token } = await newToken('write');
+    await withServer(async (base) => {
+      const res = await put(base, token, 't-02', { splits: [line('secret-category', -1, 'secret note'), line('c-fuel', -2398)] });
+      const text = await res.text();
+      expect(res.status).toBe(400);
+      expect(text).not.toContain('secret');
+    });
+  });
+
+  test('DELETE un-splits: lines gone, amount kept, no category, usable again; a second DELETE is a 400', async () => {
+    const { token, id } = await newToken('write');
+    client.state.transactions.find((t) => t.id === 't-05').category = null;
+    await withServer(async (base) => {
+      // A transaction that had a category before it was split must not get it back.
+      await put(base, token, 't-01', { splits: [line('c-fuel', -4000), line('c-groc', -4423)] });
+      const res = await del(base, token, 't-01');
+      expect(res.status).toBe(200);
+      const { transaction } = await json(res, 'transactionDetailResponse');
+      expect(transaction).toMatchObject({ id: 't-01', amount: -8423, split: false, category: null, splits: [] });
+      expect(client.state.transactions.some((t) => t.parent_id === 't-01')).toBe(false);
+      expect(client.state.transactions.find((t) => t.id === 't-01').category).toBeNull();
+      const unsplit = auditLines().find((l) => l.op === 'transaction.unsplit');
+      expect(unsplit).toEqual({ time: NOW.toISOString(), tokenId: id, op: 'transaction.unsplit', ids: { transaction: 't-01' }, amount: -8423, before: { splits: [{ category: 'c-fuel', amount: -4000, notesLength: 0 }, { category: 'c-groc', amount: -4423, notesLength: 0 }] }, after: { category: null, splits: [] } });
+
+      const again = await del(base, token, 't-01');
+      expect(again.status).toBe(400);
+      expect(await again.text()).toBe('{"error":"bad_request"}');
+      // And it can be categorised and split again.
+      expect((await call(base, token, 'PATCH', '/transactions/t-01', { category: 'c-fuel' })).status).toBe(200);
+      expect((await put(base, token, 't-01', { splits: [line('c-fuel', -8000), line('c-groc', -423)] })).status).toBe(200);
+    });
+  });
+
+  test('DELETE refusals: not split, transfer, reconciled, closed account, split child, unknown', async () => {
+    const { token } = await newToken('write');
+    client.state.transactions.push({ id: 't-rs', date: '2026-11-03', account: 'a-chk', payee: 'p-grocer', category: null, amount: -100, notes: null, cleared: true, reconciled: true, is_parent: true });
+    client.state.transactions.push({ id: 't-rs1', date: '2026-11-03', account: 'a-chk', payee: 'p-grocer', category: 'c-groc', amount: -100, notes: null, cleared: true, is_child: true, parent_id: 't-rs', sort_order: -1 });
+    await withServer(async (base) => {
+      for (const [id, status] of [['t-02', 400], ['t-04', 400], ['t-rs', 400], ['t-08', 400], ['t-05c', 404], ['t-06', 404], ['t-nope', 404], ['bad%20id', 400]]) {
+        const res = await del(base, token, id);
+        expect([id, res.status]).toEqual([id, status]);
+      }
+      expect(client.updateTransaction).not.toHaveBeenCalled();
+      expect(auditLines()).toEqual([]);
+    });
+  });
+
+  test('a failure after the first DELETE call leaves a consistent unsplit transaction and is reported as 500', async () => {
+    const { token } = await newToken('write');
+    await withServer(async (base) => {
+      await put(base, token, 't-01', { splits: [line('c-fuel', -4000), line('c-groc', -4423)] });
+      const original = client.updateTransaction.getMockImplementation();
+      client.updateTransaction.mockImplementationOnce(original).mockImplementationOnce(async () => { throw Object.assign(new Error('boom'), { code: 'EBOOM' }); });
+      const res = await del(base, token, 't-01');
+      expect(res.status).toBe(500);
+      expect(await res.text()).toBe('{"error":"internal"}');
+      const row = client.state.transactions.find((t) => t.id === 't-01');
+      expect(row.is_parent).toBe(false);
+      expect(client.state.transactions.some((t) => t.parent_id === 't-01')).toBe(false);
+      expect(auditLines().map((l) => l.op)).toEqual(['transaction.split', 'transaction.unsplit']);
+    });
+  });
+
+  test('writes are serialised with the others and accept a body of 50 long lines', async () => {
+    const { token } = await newToken('write');
+    client.state.transactions.push({ id: 't-big', date: '2026-11-02', account: 'a-chk', payee: 'p-grocer', category: null, amount: -5000, notes: null, cleared: true });
+    await withServer(async (base) => {
+      const splits = Array.from({ length: 50 }, (_, i) => line('c-groc', -100, 'n'.repeat(100)));
+      const res = await put(base, token, 't-big', { splits });
+      expect(res.status).toBe(200);
+      expect((await json(res, 'transactionDetailResponse')).transaction.splits).toHaveLength(50);
     });
   });
 });

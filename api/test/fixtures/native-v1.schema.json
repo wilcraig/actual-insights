@@ -1423,6 +1423,48 @@
           ]
         }
       }
+    },
+    "transactionSplitRequest": {
+      "description": "PUT /transactions/<id>/splits (write scope). Replaces the transaction's split lines. 2 to 50 lines; every line has a category (visible, not income), a non-zero signed amount with the same sign as the transaction, and optional notes; the amounts must add up to the transaction amount exactly. Not allowed on transfers, reconciled transactions or closed accounts. DELETE /transactions/<id>/splits (no body) removes the split: the transaction becomes a normal one with no category. Both answer transactionDetailResponse.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "splits"
+      ],
+      "properties": {
+        "splits": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "category",
+              "amount",
+              "notes"
+            ],
+            "properties": {
+              "category": {
+                "$ref": "#/definitions/id"
+              },
+              "amount": {
+                "$ref": "#/definitions/money"
+              },
+              "notes": {
+                "oneOf": [
+                  {
+                    "$ref": "#/definitions/note"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

@@ -1,5 +1,5 @@
 const { getActualClient } = require('../../actual-client');
-const { MAX_BUDGETED, badRequest, notFound, isHidden, isIncome, monthWithinWindow } = require('./common');
+const { MAX_BUDGETED, MAX_MONEY, MAX_NOTE, badRequest, notFound, isHidden, isIncome, monthWithinWindow } = require('./common');
 const { readTransactionRow, buildTransactionDetail, budgetCategory, budgetTotals } = require('./read');
 const { appendAudit } = require('./audit');
 
@@ -105,6 +105,139 @@ async function updateTransactionFields({ tokenId, transactionId, changes }) {
   });
 }
 
+const MIN_SPLITS = 2;
+const MAX_SPLIT_LINES = 50;
+
+// Category ids and amounts only (notes by length), so the audit line can
+// rebuild what was split without carrying anyone's words.
+const summariseLines = (lines) =>
+  lines.map((line) => ({
+    category: line.category && typeof line.category === 'object' ? line.category.id : line.category,
+    amount: line.amount,
+    notesLength: typeof line.notes === 'string' ? line.notes.length : 0,
+  }));
+
+// Both split operations refuse the same rows: transfers, reconciled
+// transactions and closed accounts. (A split line is never addressable, so it
+// is already a 404 before this.)
+function assertSplittable(row) {
+  if (row.transaction.transfer || row.reconciled || row.accountClosed) throw badRequest();
+}
+
+// Replace the split lines of a transaction (splitting it first when it is a
+// normal one). Findings from the feasibility test against @actual-app/api
+// 26.10: ONE updateTransaction(parentId, { subtransactions }) is atomic (a
+// single diff in one batch) and works for both a plain and an already split
+// parent: the old children are deleted and the new ones created with the
+// parent's account, date, payee and cleared flag, the parent's category reads
+// as null and its amount is untouched. sort_order must be given per line,
+// otherwise every new line inherits the parent's and the order is lost.
+async function splitTransactionLines({ tokenId, transactionId, splits }) {
+  return exclusive(async () => {
+    const client = await getActualClient();
+
+    const row = await readTransactionRow(client, transactionId);
+    if (!row) throw notFound();
+    assertSplittable(row);
+    const current = row.transaction;
+
+    if (!Array.isArray(splits) || splits.length < MIN_SPLITS || splits.length > MAX_SPLIT_LINES) throw badRequest();
+    const parentAmount = current.amount;
+    if (!Number.isInteger(parentAmount) || parentAmount === 0 || Math.abs(parentAmount) >= MAX_MONEY) throw badRequest();
+    const sign = Math.sign(parentAmount);
+    let total = 0;
+    for (const line of splits) {
+      if (!Number.isSafeInteger(line.amount) || line.amount === 0 || Math.sign(line.amount) !== sign) throw badRequest();
+      if (line.notes !== null && (typeof line.notes !== 'string' || line.notes.length > MAX_NOTE)) throw badRequest();
+      total += line.amount;
+    }
+    if (total !== parentAmount) throw badRequest();
+
+    // Every category must exist, be visible and not be income. An unknown or
+    // unusable category is the caller's mistake: a 400, like the rest.
+    const checked = new Map();
+    for (const line of splits) {
+      if (checked.has(line.category)) continue;
+      const found = await findCategory(client, line.category);
+      if (!found || isHidden(found.group, found.category) || isIncome(found.group, found.category)) throw badRequest();
+      checked.set(line.category, true);
+    }
+
+    const detail = await buildTransactionDetail(client, transactionId);
+    if (!detail) throw notFound();
+    const before = current.split ? { splits: summariseLines(detail.splits) } : { category: current.category ? current.category.id : null, splits: [] };
+
+    await client.updateTransaction(transactionId, {
+      subtransactions: splits.map((line, index) => ({
+        category: line.category,
+        amount: line.amount,
+        notes: line.notes === '' ? null : line.notes,
+        sort_order: -(index + 1),
+      })),
+    });
+    await appendAudit({
+      tokenId,
+      op: 'transaction.split',
+      ids: { transaction: transactionId },
+      amount: parentAmount,
+      before,
+      after: { splits: summariseLines(splits) },
+    });
+    await syncNow(client);
+
+    const fresh = await buildTransactionDetail(client, transactionId);
+    if (!fresh) throw notFound();
+    return { schema: 1, transaction: fresh };
+  });
+}
+
+// Remove the split: the transaction becomes a normal one with no category.
+// Two calls are needed. The first (is_parent false, no lines) removes every
+// line and un-splits the parent in one atomic change, but Actual keeps the
+// category the transaction had BEFORE it was split on the parent row (hidden
+// while split), and the diff cannot clear it in the same call because the
+// grouped view already says null. So after a sync the category is cleared in
+// a second call. Failure window: if that second call fails, the transaction is
+// an ordinary unsplit one that shows its old pre-split category (consistent,
+// nothing lost, the audit line is already written); the caller sees a 500 and
+// can PATCH the category.
+async function removeSplit({ tokenId, transactionId }) {
+  return exclusive(async () => {
+    const client = await getActualClient();
+
+    const row = await readTransactionRow(client, transactionId);
+    if (!row) throw notFound();
+    assertSplittable(row);
+    if (!row.transaction.split) throw badRequest();
+
+    const detail = await buildTransactionDetail(client, transactionId);
+    if (!detail) throw notFound();
+    const before = { splits: summariseLines(detail.splits) };
+
+    await client.updateTransaction(transactionId, { is_parent: false, subtransactions: [] });
+    await appendAudit({
+      tokenId,
+      op: 'transaction.unsplit',
+      ids: { transaction: transactionId },
+      amount: row.transaction.amount,
+      before,
+      after: { category: null, splits: [] },
+    });
+    await syncNow(client);
+
+    // Actual may hand back the pre-split category once the parent is a normal row again.
+    const reread = await readTransactionRow(client, transactionId);
+    if (reread && !reread.transaction.split && reread.transaction.category) {
+      await client.updateTransaction(transactionId, { category: null });
+      await syncNow(client);
+    }
+
+    const fresh = await buildTransactionDetail(client, transactionId);
+    if (!fresh) throw notFound();
+    return { schema: 1, transaction: fresh };
+  });
+}
+
 function findLine(budgetMonth, categoryId) {
   for (const group of budgetMonth.categoryGroups || []) {
     for (const category of group.categories || []) if (category.id === categoryId) return category;
@@ -186,4 +319,4 @@ async function moveBudget({ tokenId, month, from, to, amount }) {
   });
 }
 
-module.exports = { updateTransactionFields, setBudgetedAmount, moveBudget };
+module.exports = { updateTransactionFields, splitTransactionLines, removeSplit, setBudgetedAmount, moveBudget };
