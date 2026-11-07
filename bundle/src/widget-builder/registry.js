@@ -107,7 +107,18 @@ export const WIDGET_REGISTRY = [
   {
     id: 'subscription-radar',
     label: 'Subscription renewal radar',
-    fields: [],
+    fields: [
+      {
+        key: 'layout',
+        type: 'select',
+        label: 'Layout',
+        options: [
+          { value: 'horizontal', label: 'Horizontal timeline' },
+          { value: 'vertical', label: 'Vertical' },
+        ],
+      },
+      { key: 'excludeCategoryIds', type: 'category-multiselect', label: 'Exclude categories', optional: true },
+    ],
   },
   {
     id: 'spending-heatmap',

@@ -42,3 +42,9 @@ test('a widget-supplied body function overrides the generic rule', () => {
   const result = buildPlaceholder('pacing-bars', [{ key: 'categoryIds' }, { key: 'allGroups' }], { categoryIds: ['a'], allGroups: true }, pacingBody);
   expect(result).toBe('{{INSIGHTS:pacing-bars:{"categoryIds":["a"],"allGroups":true}}}');
 });
+
+test('subscription radar emits the keyed object', () => {
+  const fields = [{ key: 'layout' }, { key: 'excludeCategoryIds' }];
+  expect(buildPlaceholder('subscription-radar', fields, { layout: 'vertical', excludeCategoryIds: ['c1'] }))
+    .toBe('{{INSIGHTS:subscription-radar:{"layout":"vertical","excludeCategoryIds":["c1"]}}}');
+});

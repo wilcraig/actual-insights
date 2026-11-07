@@ -68,12 +68,13 @@ router.get('/', async (req, res, next) => {
     // Occurrence building lives in bills-data.js, shared with the budget
     // summary's Upcoming section.
     const data = await loadScheduleData(client);
-    const items = buildOccurrences(data, rangeStart, monthEnd).map(({ scheduleId, payeeName, date, amountCents, groupName }) => ({
+    const items = buildOccurrences(data, rangeStart, monthEnd).map(({ scheduleId, payeeName, date, amountCents, groupName, categoryId }) => ({
       scheduleId,
       payeeName,
       date,
       amountCents,
       groupName,
+      categoryId: categoryId ?? null,
     }));
 
     res.status(200).json({ items });

@@ -15,6 +15,7 @@ import SavingsRateGauge from './widgets/SavingsRateGauge.svelte';
 import SpendingSankey from './widgets/SpendingSankey.svelte';
 import SpendingTreemap from './widgets/SpendingTreemap.svelte';
 import SubscriptionRadar from './widgets/SubscriptionRadar.svelte';
+import { parseRadarConfig } from './widgets/radar-data';
 import { mountWidgetBuilderPanel } from './widget-builder/mount-toolbar';
 import WidgetBuilderPanel from './widget-builder/WidgetBuilderPanel.svelte';
 import { mountSettingsSection } from './settings-panel/mount-settings';
@@ -212,15 +213,13 @@ mountWidget('{{INSIGHTS:spending-treemap:', (host) => {
   new SpendingTreemap({ target: host });
 });
 
-// SubscriptionRadar takes no config (mount.js still requires the
-// placeholder's body to parse as JSON, so an empty or missing body like
-// `{{INSIGHTS:subscription-radar:}}` fails to parse and the widget never
-// mounts). Zero-config -- this month's window out to 30 days, same posture
-// as bills-timeline/spending-treemap. To add this widget, type the
-// following literal text into an Actual Reports "Text widget":
+// SubscriptionRadar's body is `null` (the original horizontal timeline) or
+// {"layout":"vertical"|"horizontal","excludeCategoryIds":[...]} -- see
+// parseRadarConfig. Type one of these into an Actual Reports "Text widget":
 //   {{INSIGHTS:subscription-radar:null}}
-mountWidget('{{INSIGHTS:subscription-radar:', (host) => {
-  new SubscriptionRadar({ target: host });
+mountWidget('{{INSIGHTS:subscription-radar:', (host, config) => {
+  const { layout, excludeCategoryIds } = parseRadarConfig(config);
+  new SubscriptionRadar({ target: host, props: { layout, excludeCategoryIds } });
 });
 
 // Panel mounting has no dependency on sessionStorage, so it stays outside
