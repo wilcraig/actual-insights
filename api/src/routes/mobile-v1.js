@@ -4,10 +4,10 @@ const { getActualClient, syncIfDue } = require('../actual-client');
 const { touchToken } = require('../mobile-tokens-store');
 const { bearerAuth, rateLimit, resetRateLimits, READ_LIMIT, WRITE_LIMIT } = require('../mobile/http');
 const { createReadCache } = require('../mobile/v1/cache');
-const { MONTH_PATTERN, ID_PATTERN, HttpError, badRequest, isValidId, monthWithinWindow } = require('../mobile/v1/common');
-const { MAX_LIMIT, DEFAULT_LIMIT, CURSOR_PATTERN, buildCurrency, buildAccounts, buildTransactions, buildCategories, buildBudgetMonth } = require('../mobile/v1/read');
+const { MONTH_PATTERN, ID_PATTERN, MAX_NOTE, HttpError, badRequest, notFound, isValidId, monthWithinWindow } = require('../mobile/v1/common');
+const { MAX_LIMIT, DEFAULT_LIMIT, CURSOR_PATTERN, buildCurrency, buildAccounts, buildTransactions, buildCategories, buildBudgetMonth, buildTransactionDetail } = require('../mobile/v1/read');
 const { buildSpending } = require('../mobile/v1/spending');
-const { categorizeTransaction, setBudgetedAmount, moveBudget } = require('../mobile/v1/write');
+const { updateTransactionFields, setBudgetedAmount, moveBudget } = require('../mobile/v1/write');
 
 // /api/mobile/v1: the native client API (contract: native-v1.schema.json in
 // the Chipmunk repo, copied under api/test/fixtures). Mounted BEFORE the
@@ -108,9 +108,13 @@ router.get('/accounts', readLimit, read((req) => {
 }));
 
 router.get('/transactions', readLimit, read((req) => {
-  strictQuery(req, ['account', 'uncategorized', 'limit', 'cursor']);
-  const { account, uncategorized, limit, cursor } = req.query;
+  strictQuery(req, ['account', 'uncategorized', 'group', 'category', 'limit', 'cursor']);
+  const { account, uncategorized, group, category, limit, cursor } = req.query;
   if (account !== undefined && !isValidId(account)) throw badRequest();
+  if (group !== undefined && !isValidId(group)) throw badRequest();
+  if (category !== undefined && !isValidId(category)) throw badRequest();
+  // Where the money went: at most one way of saying it.
+  if ([uncategorized, group, category].filter((v) => v !== undefined).length > 1) throw badRequest();
   if (uncategorized !== undefined && uncategorized !== '1') throw badRequest();
   if (limit !== undefined && !/^[1-9][0-9]{0,2}$/.test(limit)) throw badRequest();
   if (limit !== undefined && Number(limit) > MAX_LIMIT) throw badRequest();
@@ -118,10 +122,12 @@ router.get('/transactions', readLimit, read((req) => {
   const params = {
     account,
     uncategorized: uncategorized === '1',
+    group,
+    category,
     limit: limit === undefined ? DEFAULT_LIMIT : Number(limit),
     cursor,
   };
-  const key = `transactions|${params.account ?? ''}|${params.uncategorized ? 1 : 0}|${params.limit}|${params.cursor ?? ''}`;
+  const key = `transactions|${params.account ?? ''}|${params.uncategorized ? 1 : 0}|${params.group ?? ''}|${params.category ?? ''}|${params.limit}|${params.cursor ?? ''}`;
   return { key, build: (client) => buildTransactions(client, params) };
 }));
 
@@ -137,13 +143,39 @@ router.get('/budget/:month', readLimit, read((req) => {
 }));
 
 router.get('/reports', readLimit, read((req) => {
-  strictQuery(req, []);
+  strictQuery(req, ['report']);
+  const reportId = req.query.report;
+  if (reportId !== undefined && !isValidId(reportId)) throw badRequest();
   return {
-    key: 'reports',
+    key: `reports|${reportId ?? ''}`,
     build: async (client) => {
       // Loaded lazily so a problem in the reports code can only ever break this endpoint.
       const { buildReports } = require('../mobile/v1/reports');
-      return buildReports({ client, now: new Date() });
+      return buildReports({ client, now: new Date(), reportId });
+    },
+  };
+}));
+
+router.get('/report-list', readLimit, read((req) => {
+  strictQuery(req, []);
+  return {
+    key: 'report-list',
+    build: async (client) => {
+      const { buildReportList } = require('../mobile/v1/reports');
+      return buildReportList({ client, now: new Date() });
+    },
+  };
+}));
+
+router.get('/transactions/:id', readLimit, read((req) => {
+  strictQuery(req, []);
+  const id = pathId(req.params.id);
+  return {
+    key: `transaction|${id}`,
+    build: async (client) => {
+      const transaction = await buildTransactionDetail(client, id);
+      if (!transaction) throw notFound();
+      return { schema: 1, transaction };
     },
   };
 }));
@@ -216,14 +248,23 @@ function write(handler) {
   };
 }
 
-const categorize = write((req) => {
+// Any of category (id or null), notes (string up to 500 or null) and cleared
+// (boolean); at least one, nothing else.
+const updateTransaction = write((req) => {
   const transactionId = pathId(req.params.id);
-  const { category } = strictBody(req, ['category']);
-  if (category !== null && !isValidId(category)) throw badRequest();
-  return () => categorizeTransaction({ tokenId: req.deviceToken.id, transactionId, categoryId: category });
+  const body = req.body;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw badRequest();
+  const keys = Object.keys(body);
+  if (keys.length === 0 || !keys.every((k) => k === 'category' || k === 'notes' || k === 'cleared')) throw badRequest();
+  if ('category' in body && body.category !== null && !isValidId(body.category)) throw badRequest();
+  if ('notes' in body && body.notes !== null && (typeof body.notes !== 'string' || body.notes.length > MAX_NOTE)) throw badRequest();
+  if ('cleared' in body && typeof body.cleared !== 'boolean') throw badRequest();
+  const changes = {};
+  for (const k of keys) changes[k] = body[k];
+  return () => updateTransactionFields({ tokenId: req.deviceToken.id, transactionId, changes });
 });
 
-router.patch('/transactions/:id', writeLimit, requireWrite, parseJson, categorize);
+router.patch('/transactions/:id', writeLimit, requireWrite, parseJson, updateTransaction);
 
 // Some HTTP stacks (Android's HttpURLConnection) can't send PATCH. They send a
 // POST carrying `X-HTTP-Method-Override: PATCH`, which is treated exactly like
@@ -234,7 +275,7 @@ router.post('/transactions/:id', writeLimit, requireWrite, (req, res, next) => {
     res.status(400).json({ error: 'bad_request' });
     return;
   }
-  parseJson(req, res, (err) => (err ? next(err) : categorize(req, res, next)));
+  parseJson(req, res, (err) => (err ? next(err) : updateTransaction(req, res, next)));
 });
 
 router.put('/budget/:month/categories/:id', writeLimit, requireWrite, parseJson, write((req) => {

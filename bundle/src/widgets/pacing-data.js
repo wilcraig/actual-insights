@@ -124,38 +124,61 @@ export function buildPacingRows(items, categories) {
  * Reads a pacing-bars placeholder body, which is either the legacy bare array
  * (category id strings and `{ title, budgets }` rollups) or the object the
  * widget builder emits when "Category Groups" is ticked:
- * `{ categoryIds: [...], allGroups: true }`. Anything else reads as empty.
+ * `{ categoryIds: [...], allGroups: true, groupIds?: [...] }`. Anything else
+ * reads as empty. `groupIds` (strings only) is present only when the object
+ * carries an array of them.
  * @param {unknown} config
- * @returns {{ items: (string | { title: string, budgets: string[] })[], allGroups: boolean }}
+ * @returns {{ items: (string | { title: string, budgets: string[] })[], allGroups: boolean, groupIds?: string[] }}
  */
 export function parsePacingConfig(config) {
   if (Array.isArray(config)) return { items: config, allGroups: false };
   if (config && typeof config === 'object') {
-    return {
+    const parsed = {
       items: Array.isArray(config.categoryIds) ? config.categoryIds : [],
       allGroups: config.allGroups === true,
     };
+    if (parsed.allGroups && Array.isArray(config.groupIds)) {
+      parsed.groupIds = config.groupIds.filter((id) => typeof id === 'string');
+    }
+    return parsed;
   }
   return { items: [], allGroups: false };
 }
 
 /**
- * The widget's final `items` list: with allGroups, one rollup
- * `{ title: groupName, budgets: [categoryIds] }` per visible expense group
- * that has at least one category (income, transfer and empty groups are left
- * out; /api/category-groups already drops hidden groups and categories),
- * followed by the explicitly picked items.
- * @param {{ items: unknown[], allGroups: boolean }} parsed
- * @param {{ name: string, isIncome?: boolean, isTransfer?: boolean, categoryIds?: string[] }[]} groups
+ * The visible expense groups, in the order given (Actual's order from
+ * /api/category-groups): income, transfer and empty groups are left out
+ * (hidden groups and categories are already dropped by the API).
+ * @param {{ id?: string, name: string, isIncome?: boolean, isTransfer?: boolean, categoryIds?: string[] }[]} groups
+ * @returns {{ id: string, name: string, categoryIds: string[] }[]}
  */
-export function buildPacingItems({ items, allGroups }, groups) {
-  if (!allGroups) return items;
-  const rollups = [];
+export function visibleExpenseGroups(groups) {
+  const out = [];
   for (const group of groups || []) {
     if (!group || group.isIncome || group.isTransfer) continue;
-    const budgets = Array.isArray(group.categoryIds) ? group.categoryIds.filter((id) => typeof id === 'string') : [];
-    if (budgets.length === 0 || typeof group.name !== 'string') continue;
-    rollups.push({ title: group.name, budgets });
+    const categoryIds = Array.isArray(group.categoryIds) ? group.categoryIds.filter((id) => typeof id === 'string') : [];
+    if (categoryIds.length === 0 || typeof group.name !== 'string') continue;
+    out.push({ id: group.id, name: group.name, categoryIds });
   }
-  return [...rollups, ...items];
+  return out;
+}
+
+/**
+ * The widget's final `items` list. With allGroups: one rollup
+ * `{ title: groupName, budgets: [categoryIds] }` per visible expense group,
+ * then the explicitly picked items. Without `groupIds` that is every visible
+ * group in Actual's order; with `groupIds` it is only those groups, in
+ * exactly that order (ids that no longer exist are ignored, duplicates
+ * folded, groups created later are not added).
+ * @param {{ items: unknown[], allGroups: boolean, groupIds?: string[] }} parsed
+ * @param {Parameters<typeof visibleExpenseGroups>[0]} groups
+ */
+export function buildPacingItems({ items, allGroups, groupIds }, groups) {
+  if (!allGroups) return items;
+  let visible = visibleExpenseGroups(groups);
+  if (Array.isArray(groupIds)) {
+    const byId = new Map(visible.map((g) => [g.id, g]));
+    visible = [...new Set(groupIds)].map((id) => byId.get(id)).filter(Boolean);
+  }
+  return [...visible.map((g) => ({ title: g.name, budgets: g.categoryIds })), ...items];
 }

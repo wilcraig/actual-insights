@@ -2,6 +2,7 @@ const { q } = require('@actual-app/api');
 
 const { isIncomeGroup, isTransferGroup, loadMonthCashFlow } = require('../../cash-flow-data');
 const { parsePlaceholder, insightsBuilder } = require('./reports-insights');
+const { notFound } = require('./common');
 const { Unsupported, conditionsFilter, txFilter, dailySums, bucketSums, sumsBy } = require('./reports-query');
 const { addMonths, enumerateBuckets, fmt, lastMonths, monthKey, monthsInRange, resolveReportRange, resolveTimeFrame, startOfDay } = require('./reports-time');
 
@@ -172,7 +173,7 @@ async function spendingCard(ctx, meta) {
       }
     }
     const items = [...totals.values()].map((e) => ({ label: e.label, value: e.value / 3 }));
-    return { kind: 'breakdown', format: 'money', ...capItems(items), subtitle: 'Average of the last 3 months' };
+    return { kind: 'breakdown', chart: 'donut', format: 'money', ...capItems(items), subtitle: 'Average of the last 3 months' };
   }
   if (mode === 'budget') {
     const budgetMonth = await ctx.budgetMonth();
@@ -181,10 +182,10 @@ async function spendingCard(ctx, meta) {
       if (isIncomeGroup(group) || isTransferGroup(group)) continue;
       for (const c of group.categories || []) items.push({ label: c.name, value: Math.max(0, -(c.spent ?? 0)) });
     }
-    return { kind: 'breakdown', format: 'money', ...capItems(items), subtitle: `Spent this month, ${month}` };
+    return { kind: 'breakdown', chart: 'donut', format: 'money', ...capItems(items), subtitle: `Spent this month, ${month}` };
   }
   const flow = await loadMonthCashFlow(ctx.client, month);
-  return { kind: 'breakdown', format: 'money', ...capItems(flattenCategories(flow).map((c) => ({ label: c.label, value: c.value }))), subtitle: month };
+  return { kind: 'breakdown', chart: 'donut', format: 'money', ...capItems(flattenCategories(flow).map((c) => ({ label: c.label, value: c.value }))), subtitle: month };
 }
 
 async function calendarCard(ctx, meta) {
@@ -206,6 +207,10 @@ async function calendarCard(ctx, meta) {
   }
   return { kind: 'calendar', days, subtitle: 'Net per day' };
 }
+
+// A grouped (non-interval) report keeps the graph the author picked when it
+// has a native drawing; any other graph type leaves the default (bars).
+const BREAKDOWN_CHART = { DonutGraph: 'donut', BarGraph: 'bars', StackedBarGraph: 'bars' };
 
 const SERIES_CHART = { BarGraph: 'bar', StackedBarGraph: 'bar', LineGraph: 'line', AreaGraph: 'area', TableGraph: 'bar', DonutGraph: 'bar' };
 
@@ -270,7 +275,8 @@ async function customReportCard(ctx, meta) {
     e.value += sign * row.amount;
     folded.set(k, e);
   }
-  return { kind: 'breakdown', title, subtitle, format: 'money', ...capItems([...folded.values()]) };
+  const chart = BREAKDOWN_CHART[report.graph_type];
+  return { kind: 'breakdown', title, subtitle, ...(chart ? { chart } : {}), format: 'money', ...capItems([...folded.values()]) };
 }
 
 async function markdownCard(ctx, meta) {
@@ -343,15 +349,21 @@ function makeContext(client, now) {
   };
 }
 
-async function readWidgets(client) {
-  const pages = ((await client.aqlQuery(q('dashboard_pages').select('*'))).data || []).filter((p) => !p.tombstone);
-  const pageId = pages.length > 0 ? pages[0].id : null;
+async function readPages(client) {
+  return ((await client.aqlQuery(q('dashboard_pages').select('*'))).data || []).filter((p) => p && !p.tombstone);
+}
+
+async function readWidgets(client, pages, pageId) {
   const rows = ((await client.aqlQuery(q('dashboard').select('*'))).data || []).filter(
     (w) => w && !w.tombstone && (pageId === null || !w.dashboard_page_id || w.dashboard_page_id === pageId)
   );
   const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
   rows.sort((a, b) => n(a.y) - n(b.y) || n(a.x) - n(b.x) || String(a.id).localeCompare(String(b.id)));
   return rows.slice(0, MAX_CARDS);
+}
+
+async function readCustomReports(client) {
+  return ((await client.aqlQuery(q('custom_reports').select('*'))).data || []).filter((r) => r && !r.tombstone);
 }
 
 function cardId(widget, index, used) {
@@ -414,13 +426,40 @@ async function buildCard(ctx, widget, id, timeoutMs) {
   }
 }
 
-async function buildReports({ client, now = new Date(), cardTimeoutMs = CARD_TIMEOUT_MS } = {}) {
-  const widgets = await readWidgets(client);
+// Everything the Home menu can show: each dashboard page in page order, then
+// each saved custom report. Ids the contract would not accept are skipped.
+async function buildReportList({ client, now = new Date() } = {}) {
+  const [pages, customs] = await Promise.all([readPages(client), readCustomReports(client)]);
+  const reports = [];
+  for (const page of pages) {
+    if (typeof page.id === 'string' && ID_PATTERN.test(page.id)) reports.push({ id: page.id, title: clip(page.name || 'Dashboard'), kind: 'dashboard' });
+  }
+  const defaultId = reports.length > 0 ? reports[0].id : null;
+  for (const report of customs) {
+    if (typeof report.id === 'string' && ID_PATTERN.test(report.id)) reports.push({ id: report.id, title: clip(report.name || 'Report'), kind: 'custom' });
+  }
+  return { schema: 1, generatedAt: now.toISOString(), reports: reports.slice(0, 100), defaultId };
+}
+
+// reportId: omitted = the first dashboard page; a dashboard page id = that
+// page's widgets; a custom report id = one card. Anything else is a 404.
+async function buildReports({ client, now = new Date(), cardTimeoutMs = CARD_TIMEOUT_MS, reportId } = {}) {
+  const pages = await readPages(client);
   const ctx = makeContext(client, now);
+  let widgets;
+  if (reportId === undefined) {
+    widgets = await readWidgets(client, pages, pages.length > 0 ? pages[0].id : null);
+  } else if (pages.some((p) => p.id === reportId)) {
+    widgets = await readWidgets(client, pages, reportId);
+  } else if ((await readCustomReports(client)).some((r) => r.id === reportId)) {
+    widgets = [{ id: reportId, type: 'custom-report', meta: { id: reportId } }];
+  } else {
+    throw notFound();
+  }
   const used = new Set();
   const ids = widgets.map((w, i) => cardId(w, i, used));
   const cards = await Promise.all(widgets.map((w, i) => buildCard(ctx, w, ids[i], cardTimeoutMs)));
   return { schema: 1, generatedAt: now.toISOString(), cards };
 }
 
-module.exports = { buildReports, stripMarkdown, CARD_TIMEOUT_MS, MAX_CARDS };
+module.exports = { buildReports, buildReportList, stripMarkdown, CARD_TIMEOUT_MS, MAX_CARDS };

@@ -70,7 +70,10 @@ function parsePacingConfig(config) {
       items.push({ title: item.title, budgets: item.budgets.filter((v) => typeof v === 'string') });
     }
   }
-  return { items, allGroups: Boolean(object && config.allGroups === true) };
+  const allGroups = Boolean(object && config.allGroups === true);
+  const parsed = { items, allGroups };
+  if (allGroups && Array.isArray(config.groupIds)) parsed.groupIds = config.groupIds.filter((id) => typeof id === 'string');
+  return parsed;
 }
 
 // A single category keeps its long-standing mobile numbers: spent never goes
@@ -90,19 +93,27 @@ function rollupRow(title, members) {
 }
 
 async function pacingBars(ctx, config) {
-  const { items: picked, allGroups } = parsePacingConfig(config);
+  const { items: picked, allGroups, groupIds } = parsePacingConfig(config);
   const budgetMonth = await ctx.budgetMonth();
   const byId = new Map();
   for (const group of budgetMonth.categoryGroups || []) for (const c of group.categories || []) byId.set(c.id, c);
   const items = [];
 
   if (allGroups) {
-    // One rollup per visible expense group with something in it; a group added
-    // later shows up by itself.
+    // One rollup per visible expense group with something in it. Without
+    // groupIds that is every group in Actual's order (a group added later shows
+    // up by itself); with groupIds only those, in exactly that order, unknown
+    // and repeated ids ignored.
+    const eligible = new Map();
     for (const group of budgetMonth.categoryGroups || []) {
       if (group.hidden || isIncomeGroup(group) || isTransferGroup(group)) continue;
       const members = (group.categories || []).filter((c) => !c.hidden);
-      if (members.length > 0) items.push(rollupRow(group.name, members));
+      if (members.length > 0) eligible.set(group.id, { name: group.name, members });
+    }
+    const order = groupIds ? [...new Set(groupIds)] : [...eligible.keys()];
+    for (const id of order) {
+      const g = eligible.get(id);
+      if (g) items.push(rollupRow(g.name, g.members));
     }
   }
 
@@ -196,7 +207,7 @@ async function spendingDonut(ctx, config) {
   const only = new Set(asIdList(config));
   const flow = await loadMonthCashFlow(ctx.client, ctx.month);
   const items = flow.groups.filter((g) => only.size === 0 || only.has(g.id)).map((g) => ({ label: g.label, value: g.amountCents }));
-  return { kind: 'breakdown', format: 'money', items, subtitle: ctx.month };
+  return { kind: 'breakdown', chart: 'donut', format: 'money', items, subtitle: ctx.month };
 }
 
 async function accountBalances(ctx, config) {
@@ -206,7 +217,7 @@ async function accountBalances(ctx, config) {
   for (const account of open) {
     items.push({ label: account.name, value: await ctx.client.getAccountBalance(account.id) });
   }
-  return { kind: 'breakdown', format: 'money', items };
+  return { kind: 'breakdown', chart: 'bars', format: 'money', items };
 }
 
 // Daily spending for the last `days` days ending today, by the same rules as
@@ -245,7 +256,8 @@ const BUILDERS = {
   'burn-rate': { title: 'Spending so far', build: burnRate },
   'savings-rate-gauge': { title: 'Savings rate', build: savingsRate },
   'spending-breakdown-donut': { title: 'Spending by group', build: spendingDonut },
-  'spending-treemap': { title: 'Spending by group', build: (ctx) => spendingDonut(ctx, []) },
+  donut: { title: 'Spending by group', build: spendingDonut },
+  'spending-treemap': { title: 'Spending by group', build: async (ctx) => ({ ...(await spendingDonut(ctx, [])), chart: 'treemap' }) },
   'account-balances': { title: 'Account balances', build: accountBalances },
   'spending-heatmap': { title: 'Spending calendar', build: spendingHeatmap },
 };

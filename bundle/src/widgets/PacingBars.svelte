@@ -11,8 +11,9 @@
   //
   // With `allGroups`, one rollup per visible expense category group is built
   // from /api/category-groups and put in front of `items` (see
-  // buildPacingItems), so a group added later shows up by itself.
-  let { items = [], allGroups = false } = $props();
+  // buildPacingItems), so a group added later shows up by itself -- unless
+  // `groupIds` pins exactly which groups to show, and in what order.
+  let { items = [], allGroups = false, groupIds = undefined } = $props();
 
   let rows = $state(null);
   let errorMessage = $state(null);
@@ -88,7 +89,7 @@
           return;
         }
         const { groups } = await groupsResponse.json();
-        effectiveItems = buildPacingItems({ items, allGroups }, groups);
+        effectiveItems = buildPacingItems({ items, allGroups, groupIds }, groups);
       }
       const params = new URLSearchParams({ month, categories: collectCategoryIds(effectiveItems).join(',') });
       const response = await fetchApi(`/api/budget-pacing?${params}`);

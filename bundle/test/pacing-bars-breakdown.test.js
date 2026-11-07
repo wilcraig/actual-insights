@@ -193,3 +193,29 @@ test('allGroups: a failing /api/category-groups shows an error instead of loadin
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(target.querySelector('[role="alert"]').textContent).toContain('500');
 });
+
+test('allGroups with groupIds: only those groups, in that order', async () => {
+  fetchApi.mockImplementation(async (url) => {
+    if (url === '/api/category-groups') {
+      return jsonResponse({
+        groups: [
+          { id: 'g1', name: 'Bills', categoryIds: ['catA'] },
+          { id: 'g2', name: 'Fun', categoryIds: ['catB'] },
+          { id: 'g3', name: 'Food', categoryIds: ['catC'] },
+        ],
+      });
+    }
+    return jsonResponse({
+      daysElapsed: 10,
+      daysInMonth: 30,
+      categories: ['catA', 'catB', 'catC'].map((id) => ({ id, name: id, groupId: 'x', groupName: 'x', spent: 1, balance: 9 })),
+    });
+  });
+  document.body.innerHTML = '<div id="host"></div>';
+  const target = document.getElementById('host');
+  new PacingBars({ target, props: { items: [], allGroups: true, groupIds: ['g3', 'g1'] } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const names = [...target.querySelectorAll('.pacing-name')].map((n) => n.textContent);
+  expect(names).toEqual(['Food', 'Bills']);
+});

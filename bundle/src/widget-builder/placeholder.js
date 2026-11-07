@@ -20,10 +20,15 @@ export function buildPlaceholder(widgetId, fields, values, toBody) {
 
 /**
  * Pacing bars: with "Category Groups" ticked the body is
- * `{ categoryIds, allGroups: true }`; otherwise the legacy bare array of
- * category ids, so existing dashboards and placeholders are unchanged.
+ * `{ categoryIds, allGroups: true, groupIds }` (groupIds = the checked groups
+ * in the chosen order; left out when the group list was never loaded);
+ * otherwise the legacy bare array of category ids, so existing dashboards
+ * and placeholders are unchanged.
  */
 export function pacingBody(values) {
   const categoryIds = Array.isArray(values.categoryIds) ? values.categoryIds : [];
-  return values.allGroups === true ? { categoryIds, allGroups: true } : categoryIds;
+  if (values.allGroups !== true) return categoryIds;
+  const body = { categoryIds, allGroups: true };
+  if (Array.isArray(values.groupIds)) body.groupIds = values.groupIds;
+  return body;
 }

@@ -3,7 +3,7 @@ const os = require('os');
 const path = require('path');
 const Ajv = require('ajv');
 
-const { buildReports, stripMarkdown } = require('../src/mobile/v1/reports');
+const { buildReports, buildReportList, stripMarkdown } = require('../src/mobile/v1/reports');
 const { resolveTimeFrame, resolveReportRange } = require('../src/mobile/v1/reports-time');
 const { parsePlaceholder } = require('../src/mobile/v1/reports-insights');
 
@@ -11,6 +11,7 @@ const schema = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'nati
 const ajv = new Ajv({ allErrors: true, strict: false, formats: { 'date-time': true } });
 ajv.addSchema(schema, 'native');
 const validateResponse = ajv.compile({ $ref: 'native#/definitions/reportsResponse' });
+const validateList = ajv.compile({ $ref: 'native#/definitions/reportListResponse' });
 
 function expectValid(body) {
   if (!validateResponse(body)) throw new Error(`does not match the schema: ${JSON.stringify(validateResponse.errors)}`);
@@ -295,6 +296,64 @@ describe('time frames', () => {
   });
 });
 
+describe('chart types', () => {
+  const md = (name, config = '[]') => ({ content: `{{INSIGHTS:${name}:${config}}}` });
+  const report = (extra) => ({ id: 'rep-1', name: 'Saved', date_static: 0, date_range: 'This month', group_by: 'Category', balance_type: 'Payment', graph_type: 'BarGraph', interval: 'Monthly', conditions: [], conditions_op: 'and', show_offbudget: false, show_uncategorized: true, tombstone: false, ...extra });
+  const run = (r) => one('custom-report', { id: 'rep-1' }, { customReports: [r] });
+
+  test('custom reports: donut, bar, others', async () => {
+    expect((await run(report({ graph_type: 'DonutGraph' }))).chart).toBe('donut');
+    expect((await run(report({ graph_type: 'BarGraph' }))).chart).toBe('bars');
+    expect((await run(report({ graph_type: 'StackedBarGraph' }))).chart).toBe('bars');
+    expect('chart' in (await run(report({ graph_type: 'TableGraph' })))).toBe(false);
+    expect((await run(report({ group_by: 'Interval', graph_type: 'LineGraph' }))).chart).toBe('line');
+    expect((await run(report({ group_by: 'Interval', graph_type: 'AreaGraph' }))).chart).toBe('area');
+    expect((await run(report({ group_by: 'Interval', graph_type: 'BarGraph' }))).chart).toBe('bar');
+  });
+
+  test('spending card and Insights widgets', async () => {
+    expect((await one('spending-card', { mode: 'single-month' })).chart).toBe('donut');
+    expect((await one('spending-card', { mode: 'budget' })).chart).toBe('donut');
+    expect((await one('spending-card', { mode: 'average' })).chart).toBe('donut');
+    expect((await one('markdown-card', md('spending-breakdown-donut'))).chart).toBe('donut');
+    expect((await one('markdown-card', md('spending-treemap'))).chart).toBe('treemap');
+    expect((await one('markdown-card', md('account-balances'))).chart).toBe('bars');
+  });
+});
+
+describe('report list and report=<id>', () => {
+  const pages = [{ id: 'page-1', name: 'Main', tombstone: false }, { id: 'page-2', name: 'Second', tombstone: false }, { id: 'page-gone', name: 'Gone', tombstone: true }, { id: 'bad id', name: 'Bad', tombstone: false }];
+  const customReports = [{ id: 'rep-1', name: 'Saved', date_static: 0, date_range: 'This month', group_by: 'Category', balance_type: 'Payment', graph_type: 'DonutGraph', conditions: [], tombstone: false }, { id: 'rep-gone', name: 'Old', tombstone: true }, { id: 'bad/id', name: 'Bad', tombstone: false }];
+  const dashboard = [widget(U(1), 'markdown-card', { content: '## One' }), { ...widget(U(2), 'markdown-card', { content: '## Two' }), dashboard_page_id: 'page-2' }];
+
+  test('list: pages in order then custom reports, junk skipped, defaultId the first page', async () => {
+    const body = await buildReportList({ client: makeClient({ pages, customReports }), now: NOW });
+    expect(validateList(body)).toBe(true);
+    expect(body).toEqual({ schema: 1, generatedAt: NOW.toISOString(), reports: [{ id: 'page-1', title: 'Main', kind: 'dashboard' }, { id: 'page-2', title: 'Second', kind: 'dashboard' }, { id: 'rep-1', title: 'Saved', kind: 'custom' }], defaultId: 'page-1' });
+    const empty = await buildReportList({ client: makeClient({ pages: [], customReports: [] }), now: NOW });
+    expect(empty).toMatchObject({ reports: [], defaultId: null });
+  });
+
+  test('report=<page id>: that page; no param: the first page; custom id: one card; unknown 404', async () => {
+    const client = makeClient({ pages, customReports, dashboard });
+    const titles = async (reportId) => {
+      const body = await buildReports({ client, now: NOW, reportId });
+      expectValid(body);
+      return body.cards.map((c) => c.title);
+    };
+    expect(await titles(undefined)).toEqual(['One']);
+    expect(await titles('page-1')).toEqual(['One']);
+    expect(await titles('page-2')).toEqual(['Two']);
+    const custom = await buildReports({ client, now: NOW, reportId: 'rep-1' });
+    expectValid(custom);
+    expect(custom.cards).toHaveLength(1);
+    expect(custom.cards[0]).toMatchObject({ id: 'rep-1', kind: 'breakdown', title: 'Saved', chart: 'donut' });
+    for (const id of ['nope', 'page-gone', 'rep-gone']) {
+      await expect(buildReports({ client, now: NOW, reportId: id })).rejects.toMatchObject({ status: 404, code: 'not_found' });
+    }
+  });
+});
+
 describe('series cards', () => {
   test('cash-flow-card: income minus spending per month, last 6 months', async () => {
     const card = await one('cash-flow-card', null);
@@ -460,6 +519,22 @@ describe('Insights placeholders', () => {
     ]);
     const only = await one('markdown-card', md('pacing-bars', '{"categoryIds":[],"allGroups":true}'));
     expect(only.items.map((i) => i.label)).toEqual(['Bills', 'Fun']);
+  });
+
+  test('pacing-bars groupIds: only those groups in that order, unknown/duplicate/income ids ignored, picked rows after', async () => {
+    const labels = async (cfg) => (await one('markdown-card', md('pacing-bars', JSON.stringify(cfg)))).items.map((i) => i.label);
+    expect(await labels({ categoryIds: [], allGroups: true, groupIds: ['g-fun', 'g-bills'] })).toEqual(['Fun', 'Bills']);
+    expect(await labels({ categoryIds: [], allGroups: true, groupIds: ['g-fun'] })).toEqual(['Fun']);
+    expect(await labels({ categoryIds: [], allGroups: true, groupIds: ['g-nope', 'g-fun', 'g-fun', 'g-income'] })).toEqual(['Fun']);
+    expect(await labels({ categoryIds: ['c-power'], allGroups: true, groupIds: ['g-fun'] })).toEqual(['Fun', 'Power']);
+    expect(await labels({ categoryIds: [], allGroups: true, groupIds: [] })).toEqual([]);
+    expect(await labels({ categoryIds: [], allGroups: true, groupIds: [5, 'g-bills'] })).toEqual(['Bills']);
+    // Legacy: no groupIds means every group; groupIds without allGroups is ignored; bare array.
+    expect(await labels({ categoryIds: [], allGroups: true })).toEqual(['Bills', 'Fun']);
+    expect(await labels({ categoryIds: ['c-eat'], groupIds: ['g-fun'] })).toEqual(['Eating out']);
+    expect(await labels(['c-eat'])).toEqual(['Eating out']);
+    const card = await one('markdown-card', md('pacing-bars', '{"allGroups":true,"groupIds":["g-fun"]}'));
+    expect(card.items[0].drill).toEqual({ level: 'categories', categoryIds: ['c-eat'] });
   });
 
   test('pacing-bars object without allGroups behaves like the picked ids', async () => {

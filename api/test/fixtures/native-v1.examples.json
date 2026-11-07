@@ -47,7 +47,8 @@
         "notes": null,
         "cleared": true,
         "transfer": false,
-        "split": false
+        "split": false,
+        "categoryGroup": "Usual Expenses"
       },
       {
         "id": "tx-0002",
@@ -60,7 +61,8 @@
         "notes": "screws",
         "cleared": false,
         "transfer": false,
-        "split": false
+        "split": false,
+        "categoryGroup": null
       },
       {
         "id": "tx-0003",
@@ -73,7 +75,8 @@
         "notes": null,
         "cleared": true,
         "transfer": true,
-        "split": false
+        "split": false,
+        "categoryGroup": null
       }
     ],
     "nextCursor": "c_2026-11-09_tx-0003"
@@ -150,26 +153,9 @@
     ]
   },
   "transactionUpdateRequest": {
-    "category": "cat-groceries"
-  },
-  "transactionResponse": {
-    "schema": 1,
-    "transaction": {
-      "id": "tx-0002",
-      "date": "2026-11-10",
-      "accountId": "acct-checking-0001",
-      "accountName": "Everyday Checking",
-      "payee": "Example Hardware",
-      "amount": -2399,
-      "category": {
-        "id": "cat-groceries",
-        "name": "Groceries"
-      },
-      "notes": "screws",
-      "cleared": false,
-      "transfer": false,
-      "split": false
-    }
+    "category": "cat-groceries",
+    "notes": "screws #house",
+    "cleared": true
   },
   "budgetAmountRequest": {
     "budgeted": 47500
@@ -256,7 +242,8 @@
             "value": 18000
           }
         ],
-        "total": 63000
+        "total": 63000,
+        "chart": "donut"
       },
       {
         "id": "w-4",
@@ -320,6 +307,24 @@
         "id": "w-8",
         "kind": "unsupported",
         "title": "Sankey"
+      },
+      {
+        "id": "w-9",
+        "kind": "breakdown",
+        "title": "Where the money went",
+        "format": "money",
+        "chart": "treemap",
+        "items": [
+          {
+            "label": "Groceries",
+            "value": 45000
+          },
+          {
+            "label": "Fuel",
+            "value": 18000
+          }
+        ],
+        "total": 63000
       }
     ]
   },
@@ -403,5 +408,51 @@
         "notes": null
       }
     ]
+  },
+  "transactionDetailResponse": {
+    "schema": 1,
+    "transaction": {
+      "id": "tx-0002",
+      "date": "2026-11-10",
+      "accountId": "acct-checking-0001",
+      "accountName": "Everyday Checking",
+      "payee": "Example Hardware",
+      "amount": -2399,
+      "category": {
+        "id": "cat-groceries",
+        "name": "Groceries"
+      },
+      "categoryGroup": "Usual Expenses",
+      "notes": "screws #house",
+      "cleared": false,
+      "reconciled": false,
+      "transfer": false,
+      "split": false,
+      "importedPayee": "EXAMPLE HDWR #1234 ANYTOWN",
+      "importedId": "SFIN-0000-EXAMPLE-0001",
+      "recurring": null,
+      "tags": [
+        "house"
+      ],
+      "splits": [],
+      "transferAccountName": null
+    }
+  },
+  "reportListResponse": {
+    "schema": 1,
+    "generatedAt": "2026-11-12T15:04:05.000Z",
+    "reports": [
+      {
+        "id": "page-main",
+        "title": "Main",
+        "kind": "dashboard"
+      },
+      {
+        "id": "rep-spend-by-payee",
+        "title": "Spending by payee",
+        "kind": "custom"
+      }
+    ],
+    "defaultId": "page-main"
   }
 }

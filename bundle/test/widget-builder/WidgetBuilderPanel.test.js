@@ -313,42 +313,112 @@ test('a select-type field (account-balances\' labelContent) defaults to its firs
   );
 });
 
-test('pacing bars: ticking Category Groups allows Generate with no categories and emits the object; unticked keeps the bare array', async () => {
-  fetchApi.mockResolvedValueOnce(okJson({ categories: [{ id: 'c1', name: 'Groceries' }, { id: 'c2', name: 'Fuel' }] }));
+const GROUPS_BODY = {
+  groups: [
+    { id: 'g1', name: 'Bills', isIncome: false, isTransfer: false, categoryIds: ['c1'] },
+    { id: 'g2', name: 'Personal Income', isIncome: true, isTransfer: false, categoryIds: ['c3'] },
+    { id: 'g3', name: 'Fun', isIncome: false, isTransfer: false, categoryIds: ['c2'] },
+    { id: 'g4', name: 'Food', isIncome: false, isTransfer: false, categoryIds: ['c4'] },
+  ],
+};
+
+function groupBox() {
+  return [...document.querySelectorAll('.actualmint-wb-checkbox')].find((l) => l.textContent.trim() === 'Category Groups').querySelector('input');
+}
+
+async function setUpPacingWithGroups() {
+  fetchApi.mockImplementation(async (path) => (path === '/api/category-groups' ? okJson(GROUPS_BODY) : okJson({ categories: [{ id: 'c1', name: 'Groceries' }, { id: 'c2', name: 'Fuel' }] })));
   mount();
   await flush();
   open();
   await flush();
+}
 
+const groupNames = () => [...document.querySelectorAll('.actualmint-wb-group-row')].map((li) => li.textContent.replace(/[\u2191\u2193]/g, '').trim());
+
+test('pacing bars: ticking Category Groups allows Generate with no categories and emits the object with groupIds; unticked keeps the bare array', async () => {
+  await setUpPacingWithGroups();
   const generate = document.querySelector('.actualmint-wb-generate');
   const textarea = document.querySelector('.actualmint-wb-textarea');
-  const box = [...document.querySelectorAll('.actualmint-wb-checkbox')].find((l) => l.textContent.trim() === 'Category Groups').querySelector('input');
-  expect(document.querySelector('.actualmint-wb-help').textContent).toMatch(/one pacing bar per category group/);
-
+  expect(document.querySelector('.actualmint-wb-group-list')).toBeNull();
   expect(generate.disabled).toBe(true);
-  box.click();
+
+  groupBox().click();
   await flush();
   expect(generate.disabled).toBe(false);
+  expect(groupNames()).toEqual(['Bills', 'Fun', 'Food']);
+  expect(document.body.textContent).toMatch(/created later will not appear until the widget is regenerated/);
   generate.click();
   await flush();
-  expect(textarea.value).toBe('{{INSIGHTS:pacing-bars:{"categoryIds":[],"allGroups":true}}}');
+  expect(textarea.value).toBe('{{INSIGHTS:pacing-bars:{"categoryIds":[],"allGroups":true,"groupIds":["g1","g3","g4"]}}}');
 
-  // Plus a picked category.
-  document.querySelector('.actualmint-wb-options input[type="checkbox"]').click();
+  document.querySelector('.actualmint-wb-options:not(.actualmint-wb-group-list) input[type="checkbox"]').click();
   await flush();
   generate.click();
   await flush();
-  expect(textarea.value).toBe('{{INSIGHTS:pacing-bars:{"categoryIds":["c1"],"allGroups":true}}}');
+  expect(textarea.value).toBe('{{INSIGHTS:pacing-bars:{"categoryIds":["c1"],"allGroups":true,"groupIds":["g1","g3","g4"]}}}');
 
-  // Unticked again: back to the legacy bare array.
-  box.click();
+  groupBox().click();
   await flush();
+  expect(document.querySelector('.actualmint-wb-group-list')).toBeNull();
   generate.click();
   await flush();
   expect(textarea.value).toBe('{{INSIGHTS:pacing-bars:["c1"]}}');
 
-  // Unticked and nothing picked: Generate is blocked again.
   document.querySelector('.actualmint-wb-options input[type="checkbox"]').click();
   await flush();
   expect(generate.disabled).toBe(true);
+});
+
+test('pacing bars: groups can be unchecked and moved with labelled up/down buttons; groupIds follow the chosen order', async () => {
+  await setUpPacingWithGroups();
+  groupBox().click();
+  await flush();
+
+  const btn = (label) => document.querySelector(`button[aria-label="${label}"]`);
+  expect(btn('Move Bills up').disabled).toBe(true);
+  expect(btn('Move Food down').disabled).toBe(true);
+
+  btn('Move Food up').click();
+  await flush();
+  expect(groupNames()).toEqual(['Bills', 'Food', 'Fun']);
+  btn('Move Bills down').click();
+  await flush();
+  expect(groupNames()).toEqual(['Food', 'Bills', 'Fun']);
+
+  document.querySelector('input[aria-label="Show Fun"]').click();
+  await flush();
+
+  document.querySelector('.actualmint-wb-generate').click();
+  await flush();
+  expect(document.querySelector('.actualmint-wb-textarea').value).toBe('{{INSIGHTS:pacing-bars:{"categoryIds":[],"allGroups":true,"groupIds":["g4","g1"]}}}');
+});
+
+test('pacing bars: with every group unchecked, Generate needs a picked category', async () => {
+  await setUpPacingWithGroups();
+  groupBox().click();
+  await flush();
+  for (const name of ['Bills', 'Fun', 'Food']) document.querySelector(`input[aria-label="Show ${name}"]`).click();
+  await flush();
+  const generate = document.querySelector('.actualmint-wb-generate');
+  expect(generate.disabled).toBe(true);
+
+  document.querySelector('.actualmint-wb-options:not(.actualmint-wb-group-list) input[type="checkbox"]').click();
+  await flush();
+  expect(generate.disabled).toBe(false);
+  generate.click();
+  await flush();
+  expect(document.querySelector('.actualmint-wb-textarea').value).toBe('{{INSIGHTS:pacing-bars:{"categoryIds":["c1"],"allGroups":true,"groupIds":[]}}}');
+});
+
+test('pacing bars: a failing group list shows an error and blocks Generate', async () => {
+  fetchApi.mockImplementation(async (path) => (path === '/api/category-groups' ? { ok: false, status: 500 } : okJson({ categories: [{ id: 'c1', name: 'Groceries' }] })));
+  mount();
+  await flush();
+  open();
+  await flush();
+  groupBox().click();
+  await flush();
+  expect(document.querySelector('.actualmint-wb-groups [role="alert"]')).not.toBeNull();
+  expect(document.querySelector('.actualmint-wb-generate').disabled).toBe(true);
 });
