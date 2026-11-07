@@ -1,69 +1,407 @@
 {
-  "me": { "schema": 1, "scope": "write", "currency": "USD" },
+  "me": {
+    "schema": 1,
+    "scope": "write",
+    "currency": "USD"
+  },
   "accountsResponse": {
-    "schema": 1, "generatedAt": "2026-11-12T15:04:05.000Z",
+    "schema": 1,
+    "generatedAt": "2026-11-12T15:04:05.000Z",
     "accounts": [
-      { "id": "acct-checking-0001", "name": "Everyday Checking", "balance": 312450, "onBudget": true },
-      { "id": "acct-savings-0002", "name": "Rainy Day Savings", "balance": 1050000, "onBudget": true },
-      { "id": "acct-retire-0003", "name": "Retirement", "balance": 9900000, "onBudget": false }
+      {
+        "id": "acct-checking-0001",
+        "name": "Everyday Checking",
+        "balance": 312450,
+        "onBudget": true
+      },
+      {
+        "id": "acct-savings-0002",
+        "name": "Rainy Day Savings",
+        "balance": 1050000,
+        "onBudget": true
+      },
+      {
+        "id": "acct-retire-0003",
+        "name": "Retirement",
+        "balance": 9900000,
+        "onBudget": false
+      }
     ]
   },
   "transactionsResponse": {
-    "schema": 1, "generatedAt": "2026-11-12T15:04:05.000Z", "uncategorizedCount": 2,
+    "schema": 1,
+    "generatedAt": "2026-11-12T15:04:05.000Z",
+    "uncategorizedCount": 2,
     "transactions": [
-      { "id": "tx-0001", "date": "2026-11-11", "accountId": "acct-checking-0001", "accountName": "Everyday Checking", "payee": "Example Grocer", "amount": -8423, "category": { "id": "cat-groceries", "name": "Groceries" }, "notes": null, "cleared": true, "transfer": false, "split": false },
-      { "id": "tx-0002", "date": "2026-11-10", "accountId": "acct-checking-0001", "accountName": "Everyday Checking", "payee": "Example Hardware", "amount": -2399, "category": null, "notes": "screws", "cleared": false, "transfer": false, "split": false },
-      { "id": "tx-0003", "date": "2026-11-09", "accountId": "acct-savings-0002", "accountName": "Rainy Day Savings", "payee": "Transfer: Everyday Checking", "amount": 50000, "category": null, "notes": null, "cleared": true, "transfer": true, "split": false }
+      {
+        "id": "tx-0001",
+        "date": "2026-11-11",
+        "accountId": "acct-checking-0001",
+        "accountName": "Everyday Checking",
+        "payee": "Example Grocer",
+        "amount": -8423,
+        "category": {
+          "id": "cat-groceries",
+          "name": "Groceries"
+        },
+        "notes": null,
+        "cleared": true,
+        "transfer": false,
+        "split": false
+      },
+      {
+        "id": "tx-0002",
+        "date": "2026-11-10",
+        "accountId": "acct-checking-0001",
+        "accountName": "Everyday Checking",
+        "payee": "Example Hardware",
+        "amount": -2399,
+        "category": null,
+        "notes": "screws",
+        "cleared": false,
+        "transfer": false,
+        "split": false
+      },
+      {
+        "id": "tx-0003",
+        "date": "2026-11-09",
+        "accountId": "acct-savings-0002",
+        "accountName": "Rainy Day Savings",
+        "payee": "Transfer: Everyday Checking",
+        "amount": 50000,
+        "category": null,
+        "notes": null,
+        "cleared": true,
+        "transfer": true,
+        "split": false
+      }
     ],
     "nextCursor": "c_2026-11-09_tx-0003"
   },
   "categoriesResponse": {
-    "schema": 1, "generatedAt": "2026-11-12T15:04:05.000Z",
-    "groups": [
-      { "id": "grp-usual", "name": "Usual Expenses", "isIncome": false, "categories": [{ "id": "cat-groceries", "name": "Groceries" }, { "id": "cat-fuel", "name": "Fuel" }] },
-      { "id": "grp-income", "name": "Income", "isIncome": true, "categories": [{ "id": "cat-paycheck", "name": "Paycheck" }] }
-    ]
-  },
-  "budgetMonthResponse": {
-    "schema": 1, "generatedAt": "2026-11-12T15:04:05.000Z", "month": "2026-11",
-    "totals": { "toBudget": 163840, "budgeted": 247500, "spent": -123000, "balance": 124500, "income": 215000 },
+    "schema": 1,
+    "generatedAt": "2026-11-12T15:04:05.000Z",
     "groups": [
       {
-        "id": "grp-usual", "name": "Usual Expenses", "budgeted": 63000, "spent": -12300, "balance": 50700,
+        "id": "grp-usual",
+        "name": "Usual Expenses",
+        "isIncome": false,
         "categories": [
-          { "id": "cat-groceries", "name": "Groceries", "budgeted": 45000, "spent": -9500, "balance": 35500, "carryover": false },
-          { "id": "cat-fuel", "name": "Fuel", "budgeted": 18000, "spent": -2800, "balance": 15200, "carryover": true }
+          {
+            "id": "cat-groceries",
+            "name": "Groceries"
+          },
+          {
+            "id": "cat-fuel",
+            "name": "Fuel"
+          }
+        ]
+      },
+      {
+        "id": "grp-income",
+        "name": "Income",
+        "isIncome": true,
+        "categories": [
+          {
+            "id": "cat-paycheck",
+            "name": "Paycheck"
+          }
         ]
       }
     ]
   },
-  "transactionUpdateRequest": { "category": "cat-groceries" },
-  "transactionResponse": {
+  "budgetMonthResponse": {
     "schema": 1,
-    "transaction": { "id": "tx-0002", "date": "2026-11-10", "accountId": "acct-checking-0001", "accountName": "Everyday Checking", "payee": "Example Hardware", "amount": -2399, "category": { "id": "cat-groceries", "name": "Groceries" }, "notes": "screws", "cleared": false, "transfer": false, "split": false }
-  },
-  "budgetAmountRequest": { "budgeted": 47500 },
-  "budgetMoveRequest": { "from": "cat-fuel", "to": "cat-groceries", "amount": 2500 },
-  "budgetChangeResponse": {
-    "schema": 1, "month": "2026-11",
-    "categories": [
-      { "id": "cat-fuel", "name": "Fuel", "budgeted": 15500, "spent": -2800, "balance": 12700, "carryover": true },
-      { "id": "cat-groceries", "name": "Groceries", "budgeted": 47500, "spent": -9500, "balance": 38000, "carryover": false }
-    ],
-    "totals": { "toBudget": 163840, "budgeted": 247500, "spent": -123000, "balance": 124500, "income": 215000 }
-  },
-  "reportsResponse": {
-    "schema": 1, "generatedAt": "2026-11-12T15:04:05.000Z",
-    "cards": [
-      { "id": "w-1", "kind": "stat", "title": "Total income (YTD)", "value": 2150000, "format": "money", "compare": { "value": 1980000, "label": "Last year" } },
-      { "id": "w-2", "kind": "series", "title": "Cash flow", "subtitle": "Last 6 months", "chart": "bar", "format": "money", "points": [{ "label": "Jun", "value": 41000 }, { "label": "Jul", "value": -12000 }] },
-      { "id": "w-3", "kind": "breakdown", "title": "Spending by category", "format": "money", "items": [{ "label": "Groceries", "value": 45000 }, { "label": "Fuel", "value": 18000 }], "total": 63000 },
-      { "id": "w-4", "kind": "progress", "title": "Budget pacing", "format": "money", "items": [{ "label": "Groceries", "current": 9500, "target": 45000 }] },
-      { "id": "w-5", "kind": "list", "title": "Upcoming bills", "rows": [{ "title": "Example Utilities", "date": "2026-11-13", "value": -8400 }] },
-      { "id": "w-6", "kind": "calendar", "title": "Spending calendar", "days": [{ "date": "2026-11-01", "value": 1200 }] },
-      { "id": "w-7", "kind": "text", "title": "Notes", "text": "Check the car insurance renewal." },
-      { "id": "w-8", "kind": "unsupported", "title": "Sankey" }
+    "generatedAt": "2026-11-12T15:04:05.000Z",
+    "month": "2026-11",
+    "totals": {
+      "toBudget": 163840,
+      "budgeted": 247500,
+      "spent": -123000,
+      "balance": 124500,
+      "income": 215000
+    },
+    "groups": [
+      {
+        "id": "grp-usual",
+        "name": "Usual Expenses",
+        "budgeted": 63000,
+        "spent": -12300,
+        "balance": 50700,
+        "categories": [
+          {
+            "id": "cat-groceries",
+            "name": "Groceries",
+            "budgeted": 45000,
+            "spent": -9500,
+            "balance": 35500,
+            "carryover": false
+          },
+          {
+            "id": "cat-fuel",
+            "name": "Fuel",
+            "budgeted": 18000,
+            "spent": -2800,
+            "balance": 15200,
+            "carryover": true
+          }
+        ]
+      }
     ]
   },
-  "error": { "error": "read_only" }
+  "transactionUpdateRequest": {
+    "category": "cat-groceries"
+  },
+  "transactionResponse": {
+    "schema": 1,
+    "transaction": {
+      "id": "tx-0002",
+      "date": "2026-11-10",
+      "accountId": "acct-checking-0001",
+      "accountName": "Everyday Checking",
+      "payee": "Example Hardware",
+      "amount": -2399,
+      "category": {
+        "id": "cat-groceries",
+        "name": "Groceries"
+      },
+      "notes": "screws",
+      "cleared": false,
+      "transfer": false,
+      "split": false
+    }
+  },
+  "budgetAmountRequest": {
+    "budgeted": 47500
+  },
+  "budgetMoveRequest": {
+    "from": "cat-fuel",
+    "to": "cat-groceries",
+    "amount": 2500
+  },
+  "budgetChangeResponse": {
+    "schema": 1,
+    "month": "2026-11",
+    "categories": [
+      {
+        "id": "cat-fuel",
+        "name": "Fuel",
+        "budgeted": 15500,
+        "spent": -2800,
+        "balance": 12700,
+        "carryover": true
+      },
+      {
+        "id": "cat-groceries",
+        "name": "Groceries",
+        "budgeted": 47500,
+        "spent": -9500,
+        "balance": 38000,
+        "carryover": false
+      }
+    ],
+    "totals": {
+      "toBudget": 163840,
+      "budgeted": 247500,
+      "spent": -123000,
+      "balance": 124500,
+      "income": 215000
+    }
+  },
+  "reportsResponse": {
+    "schema": 1,
+    "generatedAt": "2026-11-12T15:04:05.000Z",
+    "cards": [
+      {
+        "id": "w-1",
+        "kind": "stat",
+        "title": "Total income (YTD)",
+        "value": 2150000,
+        "format": "money",
+        "compare": {
+          "value": 1980000,
+          "label": "Last year"
+        }
+      },
+      {
+        "id": "w-2",
+        "kind": "series",
+        "title": "Cash flow",
+        "subtitle": "Last 6 months",
+        "chart": "bar",
+        "format": "money",
+        "points": [
+          {
+            "label": "Jun",
+            "value": 41000
+          },
+          {
+            "label": "Jul",
+            "value": -12000
+          }
+        ]
+      },
+      {
+        "id": "w-3",
+        "kind": "breakdown",
+        "title": "Spending by category",
+        "format": "money",
+        "items": [
+          {
+            "label": "Groceries",
+            "value": 45000
+          },
+          {
+            "label": "Fuel",
+            "value": 18000
+          }
+        ],
+        "total": 63000
+      },
+      {
+        "id": "w-4",
+        "kind": "progress",
+        "title": "Budget pacing",
+        "format": "money",
+        "items": [
+          {
+            "label": "Usual Expenses",
+            "current": 9500,
+            "target": 45000,
+            "drill": {
+              "level": "categories",
+              "categoryIds": [
+                "cat-groceries",
+                "cat-fuel"
+              ]
+            }
+          },
+          {
+            "label": "Groceries",
+            "current": 9500,
+            "target": 45000,
+            "drill": {
+              "level": "payees",
+              "categoryId": "cat-groceries"
+            }
+          }
+        ]
+      },
+      {
+        "id": "w-5",
+        "kind": "list",
+        "title": "Upcoming bills",
+        "rows": [
+          {
+            "title": "Example Utilities",
+            "date": "2026-11-13",
+            "value": -8400
+          }
+        ]
+      },
+      {
+        "id": "w-6",
+        "kind": "calendar",
+        "title": "Spending calendar",
+        "days": [
+          {
+            "date": "2026-11-01",
+            "value": 1200
+          }
+        ]
+      },
+      {
+        "id": "w-7",
+        "kind": "text",
+        "title": "Notes",
+        "text": "Check the car insurance renewal."
+      },
+      {
+        "id": "w-8",
+        "kind": "unsupported",
+        "title": "Sankey"
+      }
+    ]
+  },
+  "error": {
+    "error": "read_only"
+  },
+  "spendingResponse": {
+    "schema": 1,
+    "generatedAt": "2026-11-12T15:04:05.000Z",
+    "month": "2026-11",
+    "level": "categories",
+    "title": "Usual Expenses",
+    "total": 12300,
+    "items": [
+      {
+        "id": "cat-groceries",
+        "label": "Groceries",
+        "amount": 9500,
+        "drill": {
+          "level": "payees",
+          "categoryId": "cat-groceries"
+        }
+      },
+      {
+        "id": "cat-fuel",
+        "label": "Fuel",
+        "amount": 2800,
+        "drill": {
+          "level": "payees",
+          "categoryId": "cat-fuel"
+        }
+      }
+    ],
+    "transactions": []
+  },
+  "spendingPayees": {
+    "schema": 1,
+    "generatedAt": "2026-11-12T15:04:05.000Z",
+    "month": "2026-11",
+    "level": "payees",
+    "title": "Groceries",
+    "total": 9500,
+    "items": [
+      {
+        "id": "payee-grocer",
+        "label": "Example Grocer",
+        "amount": 8423,
+        "drill": {
+          "level": "transactions",
+          "categoryId": "cat-groceries",
+          "payeeId": "payee-grocer"
+        }
+      },
+      {
+        "id": "__none__",
+        "label": "No payee",
+        "amount": 1077,
+        "drill": {
+          "level": "transactions",
+          "categoryId": "cat-groceries",
+          "payeeId": "__none__"
+        }
+      }
+    ],
+    "transactions": []
+  },
+  "spendingTransactions": {
+    "schema": 1,
+    "generatedAt": "2026-11-12T15:04:05.000Z",
+    "month": "2026-11",
+    "level": "transactions",
+    "title": "Example Grocer",
+    "total": 8423,
+    "items": [],
+    "transactions": [
+      {
+        "id": "tx-0001",
+        "date": "2026-11-11",
+        "payee": "Example Grocer",
+        "amount": 8423,
+        "notes": null
+      }
+    ]
+  }
 }

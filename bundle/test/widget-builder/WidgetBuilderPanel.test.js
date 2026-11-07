@@ -312,3 +312,43 @@ test('a select-type field (account-balances\' labelContent) defaults to its firs
     '{{INSIGHTS:account-balances:{"accountIds":["acc1"],"labelContent":"amount"}}}',
   );
 });
+
+test('pacing bars: ticking Category Groups allows Generate with no categories and emits the object; unticked keeps the bare array', async () => {
+  fetchApi.mockResolvedValueOnce(okJson({ categories: [{ id: 'c1', name: 'Groceries' }, { id: 'c2', name: 'Fuel' }] }));
+  mount();
+  await flush();
+  open();
+  await flush();
+
+  const generate = document.querySelector('.actualmint-wb-generate');
+  const textarea = document.querySelector('.actualmint-wb-textarea');
+  const box = [...document.querySelectorAll('.actualmint-wb-checkbox')].find((l) => l.textContent.trim() === 'Category Groups').querySelector('input');
+  expect(document.querySelector('.actualmint-wb-help').textContent).toMatch(/one pacing bar per category group/);
+
+  expect(generate.disabled).toBe(true);
+  box.click();
+  await flush();
+  expect(generate.disabled).toBe(false);
+  generate.click();
+  await flush();
+  expect(textarea.value).toBe('{{INSIGHTS:pacing-bars:{"categoryIds":[],"allGroups":true}}}');
+
+  // Plus a picked category.
+  document.querySelector('.actualmint-wb-options input[type="checkbox"]').click();
+  await flush();
+  generate.click();
+  await flush();
+  expect(textarea.value).toBe('{{INSIGHTS:pacing-bars:{"categoryIds":["c1"],"allGroups":true}}}');
+
+  // Unticked again: back to the legacy bare array.
+  box.click();
+  await flush();
+  generate.click();
+  await flush();
+  expect(textarea.value).toBe('{{INSIGHTS:pacing-bars:["c1"]}}');
+
+  // Unticked and nothing picked: Generate is blocked again.
+  document.querySelector('.actualmint-wb-options input[type="checkbox"]').click();
+  await flush();
+  expect(generate.disabled).toBe(true);
+});

@@ -117,6 +117,8 @@
       if (isPickerField(field)) {
         values[field.key] = [];
         loadPickerData(field);
+      } else if (field.type === 'checkbox') {
+        values[field.key] = false;
       } else if (field.type === 'select') {
         // Defaults to its first option rather than left unset, so a
         // single-choice field never blocks canGenerate the way an
@@ -159,14 +161,17 @@
     selectedWidget
       ? selectedWidget.fields.length === 0
         || selectedWidget.fields.every(
-          (field) => field.optional || (values[field.key] ?? []).length > 0,
+          (field) => field.optional
+            || field.type === 'checkbox'
+            || (field.optionalWhen && values[field.optionalWhen] === true)
+            || (values[field.key] ?? []).length > 0,
         )
       : false,
   );
 
   async function handleGenerate() {
     if (!selectedWidget || !canGenerate) return;
-    generatedText = buildPlaceholder(selectedWidget.id, selectedWidget.fields, values);
+    generatedText = buildPlaceholder(selectedWidget.id, selectedWidget.fields, values, selectedWidget.toBody);
     copyStatus = '';
     // Select the textarea's contents immediately so Ctrl/Cmd+C works as a
     // fallback alongside the Copy button, without requiring a manual click.
@@ -204,6 +209,17 @@
         {#if selectedWidget}
           {#each selectedWidget.fields as field (field.key)}
             <div class="actualmint-wb-field">
+              {#if field.type === 'checkbox'}
+                <label class="actualmint-wb-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={values[field.key] === true}
+                    onchange={(e) => { values = { ...values, [field.key]: e.target.checked }; }}
+                  />
+                  <span class="actualmint-wb-field-label">{field.label}</span>
+                </label>
+                {#if field.help}<p class="actualmint-wb-help">{field.help}</p>{/if}
+              {:else}
               <span class="actualmint-wb-field-label">{field.label}</span>
               {#if field.type === 'select'}
                 <select
@@ -240,6 +256,7 @@
                     </li>
                   {/each}
                 </ul>
+              {/if}
               {/if}
             </div>
           {/each}
@@ -340,6 +357,18 @@
 
   .actualmint-wb-field-label {
     font-weight: 600;
+  }
+
+  .actualmint-wb-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .actualmint-wb-help {
+    margin: 0;
+    font-size: 0.8rem;
+    color: #555;
   }
 
   .actualmint-wb-filter {

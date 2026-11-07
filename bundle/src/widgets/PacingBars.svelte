@@ -1,6 +1,6 @@
 <script>
   import { mount, unmount } from 'svelte';
-  import { computeBarState, collectCategoryIds, buildPacingRows } from './pacing-data';
+  import { computeBarState, collectCategoryIds, buildPacingRows, buildPacingItems } from './pacing-data';
   import { fetchApi } from '../api-client';
   import CategoryBreakdownModal from './CategoryBreakdownModal.svelte';
 
@@ -8,7 +8,11 @@
   // rollup object `{ title, budgets: [categoryId, ...] }` that combines
   // several categories' spent/available amounts into one bar labeled
   // `title` -- see buildPacingRows in pacing-data.js for the shaping logic.
-  let { items = [] } = $props();
+  //
+  // With `allGroups`, one rollup per visible expense category group is built
+  // from /api/category-groups and put in front of `items` (see
+  // buildPacingItems), so a group added later shows up by itself.
+  let { items = [], allGroups = false } = $props();
 
   let rows = $state(null);
   let errorMessage = $state(null);
@@ -76,7 +80,17 @@
 
     try {
       const month = currentMonth();
-      const params = new URLSearchParams({ month, categories: collectCategoryIds(items).join(',') });
+      let effectiveItems = items;
+      if (allGroups) {
+        const groupsResponse = await fetchApi('/api/category-groups');
+        if (!groupsResponse.ok) {
+          errorMessage = `Category groups unavailable (${groupsResponse.status})`;
+          return;
+        }
+        const { groups } = await groupsResponse.json();
+        effectiveItems = buildPacingItems({ items, allGroups }, groups);
+      }
+      const params = new URLSearchParams({ month, categories: collectCategoryIds(effectiveItems).join(',') });
       const response = await fetchApi(`/api/budget-pacing?${params}`);
 
       if (!response.ok) {
@@ -85,7 +99,7 @@
       }
 
       const data = await response.json();
-      rows = buildPacingRows(items, data.categories).map((row) => ({
+      rows = buildPacingRows(effectiveItems, data.categories).map((row) => ({
         ...row,
         bar: computeBarState(
           { budgeted: row.budgeted, spent: row.spent },

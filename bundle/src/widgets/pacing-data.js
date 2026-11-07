@@ -76,6 +76,7 @@ export function collectCategoryIds(items) {
 export function buildPacingRows(items, categories) {
   const byId = new Map(categories.map((c) => [c.id, c]));
   const rows = [];
+  const usedRollupIds = new Set();
 
   for (const item of items) {
     if (typeof item === 'string') {
@@ -96,9 +97,14 @@ export function buildPacingRows(items, categories) {
     if (item && typeof item === 'object' && typeof item.title === 'string' && Array.isArray(item.budgets)) {
       const members = item.budgets.map((id) => byId.get(id)).filter(Boolean);
       if (members.length === 0) continue;
+      // Two groups can share a name; the row id is a keyed-each key, so it
+      // must stay unique.
+      let rollupId = `rollup:${item.title}`;
+      for (let n = 2; usedRollupIds.has(rollupId); n += 1) rollupId = `rollup:${item.title}#${n}`;
+      usedRollupIds.add(rollupId);
       rows.push({
         kind: 'rollup',
-        id: `rollup:${item.title}`,
+        id: rollupId,
         name: item.title,
         spent: members.reduce((sum, c) => sum + c.spent, 0),
         budgeted: members.reduce((sum, c) => sum + effectiveBudget(c), 0),
@@ -112,4 +118,44 @@ export function buildPacingRows(items, categories) {
   }
 
   return rows;
+}
+
+/**
+ * Reads a pacing-bars placeholder body, which is either the legacy bare array
+ * (category id strings and `{ title, budgets }` rollups) or the object the
+ * widget builder emits when "Category Groups" is ticked:
+ * `{ categoryIds: [...], allGroups: true }`. Anything else reads as empty.
+ * @param {unknown} config
+ * @returns {{ items: (string | { title: string, budgets: string[] })[], allGroups: boolean }}
+ */
+export function parsePacingConfig(config) {
+  if (Array.isArray(config)) return { items: config, allGroups: false };
+  if (config && typeof config === 'object') {
+    return {
+      items: Array.isArray(config.categoryIds) ? config.categoryIds : [],
+      allGroups: config.allGroups === true,
+    };
+  }
+  return { items: [], allGroups: false };
+}
+
+/**
+ * The widget's final `items` list: with allGroups, one rollup
+ * `{ title: groupName, budgets: [categoryIds] }` per visible expense group
+ * that has at least one category (income, transfer and empty groups are left
+ * out; /api/category-groups already drops hidden groups and categories),
+ * followed by the explicitly picked items.
+ * @param {{ items: unknown[], allGroups: boolean }} parsed
+ * @param {{ name: string, isIncome?: boolean, isTransfer?: boolean, categoryIds?: string[] }[]} groups
+ */
+export function buildPacingItems({ items, allGroups }, groups) {
+  if (!allGroups) return items;
+  const rollups = [];
+  for (const group of groups || []) {
+    if (!group || group.isIncome || group.isTransfer) continue;
+    const budgets = Array.isArray(group.categoryIds) ? group.categoryIds.filter((id) => typeof id === 'string') : [];
+    if (budgets.length === 0 || typeof group.name !== 'string') continue;
+    rollups.push({ title: group.name, budgets });
+  }
+  return [...rollups, ...items];
 }

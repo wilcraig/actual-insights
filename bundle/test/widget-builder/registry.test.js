@@ -2,8 +2,9 @@ import { WIDGET_REGISTRY } from '../../src/widget-builder/registry';
 
 test('registers every widget with a mount.js consumer, and nothing unimplemented', () => {
   expect(WIDGET_REGISTRY).toEqual([
-    { id: 'pacing-bars', label: 'Pacing bars', fields: [
-      { key: 'categoryIds', type: 'category-multiselect', label: 'Categories' },
+    { id: 'pacing-bars', label: 'Pacing bars', toBody: expect.any(Function), fields: [
+      { key: 'categoryIds', type: 'category-multiselect', label: 'Categories', optionalWhen: 'allGroups' },
+      { key: 'allGroups', type: 'checkbox', label: 'Category Groups', help: expect.any(String) },
     ] },
     { id: 'month-end-net', label: 'Projected month-end net', fields: [] },
     { id: 'paycheck-alerts', label: 'Paycheck alerts (3-paycheck months)', fields: [] },
@@ -35,4 +36,11 @@ test('registers every widget with a mount.js consumer, and nothing unimplemented
       ] },
     ] },
   ]);
+});
+
+test('the Category Groups checkbox has one short helper sentence', () => {
+  const field = WIDGET_REGISTRY.find((w) => w.id === 'pacing-bars').fields.find((f) => f.key === 'allGroups');
+  expect(field.label).toBe('Category Groups');
+  expect(field.help).toMatch(/one pacing bar per category group/);
+  expect(field.help.split('. ').length).toBe(1);
 });

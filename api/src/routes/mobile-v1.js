@@ -6,6 +6,7 @@ const { bearerAuth, rateLimit, resetRateLimits, READ_LIMIT, WRITE_LIMIT } = requ
 const { createReadCache } = require('../mobile/v1/cache');
 const { MONTH_PATTERN, ID_PATTERN, HttpError, badRequest, isValidId, monthWithinWindow } = require('../mobile/v1/common');
 const { MAX_LIMIT, DEFAULT_LIMIT, CURSOR_PATTERN, buildCurrency, buildAccounts, buildTransactions, buildCategories, buildBudgetMonth } = require('../mobile/v1/read');
+const { buildSpending } = require('../mobile/v1/spending');
 const { categorizeTransaction, setBudgetedAmount, moveBudget } = require('../mobile/v1/write');
 
 // /api/mobile/v1: the native client API (contract: native-v1.schema.json in
@@ -145,6 +146,47 @@ router.get('/reports', readLimit, read((req) => {
       return buildReports({ client, now: new Date() });
     },
   };
+}));
+
+// The drill-down behind a pacing row. Exactly the fields its level needs, each
+// a single plain string; categoryIds is a comma list of at most 200 ids.
+const SPENDING_LEVELS = {
+  categories: ['categoryIds'],
+  payees: ['categoryId'],
+  transactions: ['categoryId', 'payeeId'],
+};
+const PAYEE_ID = /^([A-Za-z0-9_-]{1,64}|__none__)$/;
+
+function currentMonthKey(now = new Date()) {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+router.get('/spending', readLimit, read((req) => {
+  strictQuery(req, ['month', 'level', 'categoryIds', 'categoryId', 'payeeId']);
+  const { level, categoryIds, categoryId, payeeId } = req.query;
+  if (!Object.prototype.hasOwnProperty.call(SPENDING_LEVELS, level)) throw badRequest();
+  const needed = SPENDING_LEVELS[level];
+  for (const field of ['categoryIds', 'categoryId', 'payeeId']) {
+    if ((req.query[field] !== undefined) !== needed.includes(field)) throw badRequest();
+  }
+  const month = req.query.month === undefined ? currentMonthKey() : req.query.month;
+  if (!MONTH_PATTERN.test(month) || !monthWithinWindow(month)) throw badRequest();
+
+  const scope = { level };
+  if (level === 'categories') {
+    const ids = categoryIds.split(',');
+    if (ids.length > 200 || !ids.every(isValidId)) throw badRequest();
+    scope.categoryIds = [...new Set(ids)];
+  } else {
+    if (!isValidId(categoryId)) throw badRequest();
+    scope.categoryId = categoryId;
+    if (level === 'transactions') {
+      if (!PAYEE_ID.test(payeeId)) throw badRequest();
+      scope.payeeId = payeeId;
+    }
+  }
+  const key = `spending|${month}|${level}|${scope.categoryIds ? scope.categoryIds.join(',') : ''}|${scope.categoryId ?? ''}|${scope.payeeId ?? ''}`;
+  return { key, build: (client) => buildSpending(client, month, scope, new Date()) };
 }));
 
 // Writes: rate limited on their own, then scope-checked (a read token changes
