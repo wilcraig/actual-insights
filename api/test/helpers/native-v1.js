@@ -68,6 +68,8 @@ function makeFakeActual(overrides = {}) {
       { id: 't-09', date: '2026-11-07', account: 'a-sav', payee: null, category: null, amount: -300, notes: null, cleared: true },
       { id: 't-10', date: '2026-11-06', account: 'a-chk', payee: 'p-grocer', category: 'c-fuel', amount: -1200, notes: null, cleared: true },
     ],
+    // Actual's account groups, in its order ({ id, name }); an account joins one with account_group_id.
+    accountGroups: [],
     currency: 'USD',
     calls: [],
     syncs: 0,
@@ -116,6 +118,7 @@ function makeFakeActual(overrides = {}) {
     state,
     sync: jest.fn(async () => { state.syncs += 1; }),
     getAccounts: jest.fn(async () => state.accounts.map(({ balance, ...a }) => a)),
+    getAccountGroups: jest.fn(async () => state.accountGroups),
     getAccountBalance: jest.fn(async (id) => acct(id).balance),
     getCategoryGroups: jest.fn(async () => state.groups),
     getBudgetMonth: jest.fn(async (month) => {

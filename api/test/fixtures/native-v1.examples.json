@@ -12,19 +12,29 @@
         "id": "acct-checking-0001",
         "name": "Everyday Checking",
         "balance": 312450,
-        "onBudget": true
+        "onBudget": true,
+        "groupId": "grp-cash"
       },
       {
         "id": "acct-savings-0002",
         "name": "Rainy Day Savings",
         "balance": 1050000,
-        "onBudget": true
+        "onBudget": true,
+        "groupId": "grp-cash"
       },
       {
         "id": "acct-retire-0003",
         "name": "Retirement",
         "balance": 9900000,
-        "onBudget": false
+        "onBudget": false,
+        "groupId": null
+      }
+    ],
+    "groups": [
+      {
+        "id": "grp-cash",
+        "name": "Cash",
+        "balance": 1362450
       }
     ]
   },
@@ -48,7 +58,8 @@
         "cleared": true,
         "transfer": false,
         "split": false,
-        "categoryGroup": "Usual Expenses"
+        "categoryGroup": "Usual Expenses",
+        "color": "green"
       },
       {
         "id": "tx-0002",
@@ -62,7 +73,8 @@
         "cleared": false,
         "transfer": false,
         "split": false,
-        "categoryGroup": null
+        "categoryGroup": null,
+        "color": null
       },
       {
         "id": "tx-0003",
@@ -76,7 +88,8 @@
         "cleared": true,
         "transfer": true,
         "split": false,
-        "categoryGroup": null
+        "categoryGroup": null,
+        "color": null
       }
     ],
     "nextCursor": "c_2026-11-09_tx-0003"
@@ -92,13 +105,16 @@
         "categories": [
           {
             "id": "cat-groceries",
-            "name": "Groceries"
+            "name": "Groceries",
+            "color": "blue"
           },
           {
             "id": "cat-fuel",
-            "name": "Fuel"
+            "name": "Fuel",
+            "color": "blue"
           }
-        ]
+        ],
+        "color": "blue"
       },
       {
         "id": "grp-income",
@@ -107,9 +123,11 @@
         "categories": [
           {
             "id": "cat-paycheck",
-            "name": "Paycheck"
+            "name": "Paycheck",
+            "color": "teal"
           }
-        ]
+        ],
+        "color": "teal"
       }
     ]
   },
@@ -138,7 +156,8 @@
             "budgeted": 45000,
             "spent": -9500,
             "balance": 35500,
-            "carryover": false
+            "carryover": false,
+            "color": "blue"
           },
           {
             "id": "cat-fuel",
@@ -146,9 +165,11 @@
             "budgeted": 18000,
             "spent": -2800,
             "balance": 15200,
-            "carryover": true
+            "carryover": true,
+            "color": "blue"
           }
-        ]
+        ],
+        "color": "blue"
       }
     ]
   },
@@ -175,7 +196,8 @@
         "budgeted": 15500,
         "spent": -2800,
         "balance": 12700,
-        "carryover": true
+        "carryover": true,
+        "color": "blue"
       },
       {
         "id": "cat-groceries",
@@ -183,7 +205,8 @@
         "budgeted": 47500,
         "spent": -9500,
         "balance": 38000,
-        "carryover": false
+        "carryover": false,
+        "color": "blue"
       }
     ],
     "totals": {
@@ -435,7 +458,8 @@
         "house"
       ],
       "splits": [],
-      "transferAccountName": null
+      "transferAccountName": null,
+      "color": "green"
     }
   },
   "reportListResponse": {
@@ -749,5 +773,42 @@
   "okResponse": {
     "schema": 1,
     "ok": true
+  },
+  "colorsResponse": {
+    "schema": 1,
+    "generatedAt": "2026-11-12T15:04:05.000Z",
+    "groups": [
+      {
+        "id": "grp-usual",
+        "name": "Usual Expenses",
+        "color": "blue",
+        "explicit": false
+      },
+      {
+        "id": "grp-bills",
+        "name": "Bills",
+        "color": "orange",
+        "explicit": true
+      }
+    ],
+    "categories": [
+      {
+        "id": "cat-groceries",
+        "name": "Groceries",
+        "groupId": "grp-usual",
+        "color": "green",
+        "explicit": true
+      },
+      {
+        "id": "cat-fuel",
+        "name": "Fuel",
+        "groupId": "grp-usual",
+        "color": "blue",
+        "explicit": false
+      }
+    ]
+  },
+  "colorSetRequest": {
+    "color": "orange"
   }
 }

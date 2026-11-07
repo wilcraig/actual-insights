@@ -3,6 +3,8 @@ const { q } = require('@actual-app/api');
 const { isIncomeGroup, isTransferGroup, loadMonthCashFlow } = require('../../cash-flow-data');
 const { parsePlaceholder, insightsBuilder, groupDrills } = require('./reports-insights');
 const { notFound } = require('./common');
+const { isColorKey, createColorResolver } = require('./colors');
+const { readColors } = require('../../mobile-colors-store');
 const { Unsupported, conditionsFilter, txFilter, dailySums, bucketSums, sumsBy, sumsByDateAnd } = require('./reports-query');
 const { addMonths, bucketKey: bucketKeyOf, enumerateBuckets, fmt, lastMonths, monthKey, monthsInRange, resolveReportRange, resolveTimeFrame, startOfDay } = require('./reports-time');
 
@@ -84,7 +86,7 @@ function textCard(meta) {
 function capItems(items, max = MAX_ITEMS) {
   const clean = items
     .filter((i) => i.value !== 0)
-    .map((i) => ({ label: clip(i.label || 'Uncategorized'), value: money(i.value), ...(i.drill ? { drill: i.drill } : {}) }));
+    .map((i) => ({ label: clip(i.label || 'Uncategorized'), value: money(i.value), ...(i.drill ? { drill: i.drill } : {}), ...(isColorKey(i.color) ? { color: i.color } : {}) }));
   clean.sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
   const total = clean.reduce((sum, i) => sum + i.value, 0);
   if (clean.length <= max) return { items: clean, total: money(total) };
@@ -176,6 +178,7 @@ function flattenCategories(flow) {
 }
 
 async function spendingCard(ctx, meta) {
+  const colors = await ctx.colors();
   const mode = meta && meta.mode;
   const month = ctx.month;
   if (mode === 'average') {
@@ -189,7 +192,7 @@ async function spendingCard(ctx, meta) {
         totals.set(c.id, e);
       }
     }
-    const items = [...totals.entries()].map(([id, e]) => ({ label: e.label, value: e.value / 3, ...categoryDrill(id) }));
+    const items = [...totals.entries()].map(([id, e]) => ({ label: e.label, value: e.value / 3, ...categoryDrill(id), ...colors.categoryField(id) }));
     return { kind: 'breakdown', chart: 'donut', format: 'money', ...capItems(items), subtitle: 'Average of the last 3 months' };
   }
   if (mode === 'budget') {
@@ -197,12 +200,12 @@ async function spendingCard(ctx, meta) {
     const items = [];
     for (const group of budgetMonth.categoryGroups || []) {
       if (isIncomeGroup(group) || isTransferGroup(group)) continue;
-      for (const c of group.categories || []) items.push({ label: c.name, value: Math.max(0, -(c.spent ?? 0)), ...categoryDrill(c.id) });
+      for (const c of group.categories || []) items.push({ label: c.name, value: Math.max(0, -(c.spent ?? 0)), ...categoryDrill(c.id), ...colors.categoryField(c.id) });
     }
     return { kind: 'breakdown', chart: 'donut', format: 'money', ...capItems(items), subtitle: `Spent this month, ${month}` };
   }
   const flow = await loadMonthCashFlow(ctx.client, month);
-  return { kind: 'breakdown', chart: 'donut', format: 'money', ...capItems(flattenCategories(flow).map((c) => ({ label: c.label, value: c.value, ...categoryDrill(c.id) }))), subtitle: month };
+  return { kind: 'breakdown', chart: 'donut', format: 'money', ...capItems(flattenCategories(flow).map((c) => ({ label: c.label, value: c.value, ...categoryDrill(c.id), ...colors.categoryField(c.id) }))), subtitle: month };
 }
 
 async function calendarCard(ctx, meta) {
@@ -262,6 +265,7 @@ const parseJson = (v) => {
 async function groupResolver(ctx, groupBy, report) {
   const names = new Map();
   let drills = null;
+  const colors = await ctx.colors();
   if (groupBy === 'Payee') for (const p of await ctx.payees()) names.set(p.id, p.name);
   else if (groupBy === 'Account') for (const a of await ctx.accounts()) names.set(a.id, a.name);
   else if (groupBy === 'Group') {
@@ -275,13 +279,13 @@ async function groupResolver(ctx, groupBy, report) {
     if (groupBy === 'Group') {
       const g = names.get(id);
       if (!g) return { key: 'none', label: 'Uncategorized' };
-      return { key: String(g.id), label: g.name, ...(drills.has(g.id) ? { drill: drills.get(g.id) } : {}) };
+      return { key: String(g.id), label: g.name, ...(drills.has(g.id) ? { drill: drills.get(g.id) } : {}), ...colors.groupField(g.id) };
     }
     const name = names.get(id);
     return {
       key: String(id),
       label: name || (id === null ? 'Uncategorized' : 'Unknown'),
-      ...(groupBy === 'Category' ? categoryDrill(id) : {}),
+      ...(groupBy === 'Category' ? { ...categoryDrill(id), ...colors.categoryField(id) } : {}),
     };
   };
 }
@@ -388,7 +392,7 @@ async function customReportCard(ctx, meta) {
   for (const row of rows) {
     const group = resolve(row.id);
     if (!group) continue;
-    const e = folded.get(group.key) || { label: group.label, value: 0, ...(group.drill ? { drill: group.drill } : {}) };
+    const e = folded.get(group.key) || { label: group.label, value: 0, ...(group.drill ? { drill: group.drill } : {}), ...(group.color ? { color: group.color } : {}) };
     e.value += sign * row.amount;
     folded.set(group.key, e);
   }
@@ -456,6 +460,7 @@ function makeContext(client, now) {
     budgetMonth: () => once('budgetMonth', () => client.getBudgetMonth(month)),
     accounts: () => once('accounts', async () => (await client.getAccounts()) || []),
     payees: () => once('payees', async () => (await client.getPayees()) || []),
+    colors: () => once('colors', async () => createColorResolver((await client.getCategoryGroups()) || [], await readColors())),
     categoryGroups: () => once('categoryGroups', async () => (await client.getCategoryGroups()) || []),
     customReports: () => once('customReports', async () => ((await client.aqlQuery(q('custom_reports').select('*'))).data) || []),
     earliest: () =>
@@ -560,6 +565,7 @@ async function buildCard(ctx, widget, id, timeoutMs) {
         const item = { label: clip(i.label), current: money(i.current), target: money(i.target) };
         const drill = cleanDrill(i.drill);
         if (drill) item.drill = drill;
+        if (isColorKey(i.color)) item.color = i.color;
         return item;
       });
     }

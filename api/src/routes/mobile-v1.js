@@ -7,6 +7,7 @@ const { bearerAuth, rateLimit, resetRateLimits, READ_LIMIT, WRITE_LIMIT } = requ
 const { createReadCache } = require('../mobile/v1/cache');
 const { MONTH_PATTERN, ID_PATTERN, MAX_NOTE, MAX_MONEY, HttpError, badRequest, notFound, isValidId, monthWithinWindow } = require('../mobile/v1/common');
 const { MAX_LIMIT, DEFAULT_LIMIT, CURSOR_PATTERN, buildCurrency, buildAccounts, buildTransactions, buildCategories, buildBudgetMonth, buildTransactionDetail } = require('../mobile/v1/read');
+const { buildColors, putColor, isColorKey } = require('../mobile/v1/colors');
 const { buildSpending } = require('../mobile/v1/spending');
 const { updateTransactionFields, splitTransactionLines, removeSplit, setBudgetedAmount, moveBudget } = require('../mobile/v1/write');
 
@@ -142,6 +143,11 @@ router.get('/transactions', readLimit, read((req) => {
 router.get('/categories', readLimit, read((req) => {
   strictQuery(req, []);
   return { key: 'categories', build: (client) => buildCategories(client) };
+}));
+
+router.get('/colors', readLimit, read((req) => {
+  strictQuery(req, []);
+  return { key: 'colors', build: (client) => buildColors(client) };
 }));
 
 router.get('/budget/:month', readLimit, read((req) => {
@@ -317,6 +323,17 @@ router.put('/budget/:month/categories/:id', writeLimit, requireWrite, parseJson,
   if (!isCents(budgeted, 0, 1000000000000)) throw badRequest();
   return () => setBudgetedAmount({ tokenId: req.deviceToken.id, month, categoryId, budgeted });
 }));
+
+// Colours: {color: <colorKey>|null}, nothing else; null returns to the default.
+const putColorRoute = (kind) =>
+  write((req) => {
+    const id = pathId(req.params.id);
+    const { color } = strictBody(req, ['color']);
+    if (color !== null && !isColorKey(color)) throw badRequest();
+    return () => putColor({ tokenId: req.deviceToken.id, kind, id, color });
+  });
+router.put('/colors/groups/:id', writeLimit, requireWrite, parseJson, putColorRoute('groups'));
+router.put('/colors/categories/:id', writeLimit, requireWrite, parseJson, putColorRoute('categories'));
 
 router.post('/budget/:month/move', writeLimit, requireWrite, parseJson, write((req) => {
   const month = pathMonth(req);

@@ -3,6 +3,7 @@ const os = require('os');
 const path = require('path');
 const Ajv = require('ajv');
 
+const { createColorResolver } = require('../src/mobile/v1/colors');
 const { buildReports, buildReportList, stripMarkdown } = require('../src/mobile/v1/reports');
 const { resolveTimeFrame, resolveReportRange } = require('../src/mobile/v1/reports-time');
 const { parsePlaceholder } = require('../src/mobile/v1/reports-insights');
@@ -395,15 +396,15 @@ describe('breakdown and calendar cards', () => {
     const card = await one('spending-card', { name: 'This Month', mode: 'single-month' });
     expect(card).toMatchObject({ kind: 'breakdown', title: 'This Month', format: 'money', total: 106500 });
     expect(card.items).toEqual([
-      { label: 'Rent', value: 100000, drill: { level: 'payees', categoryId: 'c-rent' } },
-      { label: 'Eating out', value: 4000, drill: { level: 'payees', categoryId: 'c-eat' } },
-      { label: 'Power', value: 2500, drill: { level: 'payees', categoryId: 'c-power' } },
+      { label: 'Rent', value: 100000, drill: { level: 'payees', categoryId: 'c-rent' }, color: 'blue' },
+      { label: 'Eating out', value: 4000, drill: { level: 'payees', categoryId: 'c-eat' }, color: 'teal' },
+      { label: 'Power', value: 2500, drill: { level: 'payees', categoryId: 'c-power' }, color: 'blue' },
     ]);
   });
 
   test('spending-card average: mean of the last three months', async () => {
     const card = await one('spending-card', { mode: 'average' });
-    expect(card.items[0]).toEqual({ label: 'Rent', value: 66667, drill: { level: 'payees', categoryId: 'c-rent' } });
+    expect(card.items[0]).toEqual({ label: 'Rent', value: 66667, drill: { level: 'payees', categoryId: 'c-rent' }, color: 'blue' });
     expect(card.total).toBe(Math.round(card.items.reduce((s, i) => s + i.value, 0)));
   });
 
@@ -431,14 +432,14 @@ describe('custom-report', () => {
   test('groupBy Category as a breakdown of payments (positive)', async () => {
     const card = await run(report({ date_range: 'This month' }));
     expect(card).toMatchObject({ kind: 'breakdown', title: 'Saved', total: 106500 });
-    expect(card.items[0]).toEqual({ label: 'Rent', value: 100000, drill: { level: 'payees', categoryId: 'c-rent' } });
+    expect(card.items[0]).toEqual({ label: 'Rent', value: 100000, drill: { level: 'payees', categoryId: 'c-rent' }, color: 'blue' });
   });
 
   test('groupBy Group, Payee and Account', async () => {
     const group = await run(report({ date_range: 'This month', group_by: 'Group' }));
     expect(group.items).toEqual([
-      { label: 'Bills', value: 102500, drill: { level: 'categories', categoryIds: ['c-rent', 'c-power'] } },
-      { label: 'Fun', value: 4000, drill: { level: 'categories', categoryIds: ['c-eat'] } },
+      { label: 'Bills', value: 102500, drill: { level: 'categories', categoryIds: ['c-rent', 'c-power'] }, color: 'blue' },
+      { label: 'Fun', value: 4000, drill: { level: 'categories', categoryIds: ['c-eat'] }, color: 'teal' },
     ]);
     const payee = await run(report({ date_range: 'Last month', group_by: 'Payee' }));
     expect(payee.items.map((i) => i.label).sort()).toEqual(['Example Diner', 'Uncategorized']);
@@ -465,7 +466,7 @@ describe('custom-report', () => {
 
   test('conditions narrow the report; unrepresentable ones fall back to unsupported', async () => {
     const narrowed = await run(report({ date_range: 'This month', conditions: [{ field: 'category', op: 'oneOf', value: ['c-eat'] }] }));
-    expect(narrowed.items).toEqual([{ label: 'Eating out', value: 4000, drill: { level: 'payees', categoryId: 'c-eat' } }]);
+    expect(narrowed.items).toEqual([{ label: 'Eating out', value: 4000, drill: { level: 'payees', categoryId: 'c-eat' }, color: 'teal' }]);
     const bad = await run(report({ conditions: [{ field: 'category', op: 'notOneOf', value: ['c-eat'] }] }));
     expect(bad).toEqual({ id: U(1), kind: 'unsupported', title: 'Report' });
   });
@@ -511,28 +512,47 @@ describe('Insights placeholders', () => {
     const card = await one('markdown-card', md('pacing-bars', '["c-rent","c-eat"]'));
     expect(card).toMatchObject({ kind: 'progress', format: 'money', title: 'Budget pacing' });
     expect(card.items).toEqual([
-      { label: 'Rent', current: 100000, target: 100000, drill: { level: 'payees', categoryId: 'c-rent' } },
-      { label: 'Eating out', current: 4000, target: 20000, drill: { level: 'payees', categoryId: 'c-eat' } },
+      { label: 'Rent', current: 100000, target: 100000, drill: { level: 'payees', categoryId: 'c-rent' }, color: 'blue' },
+      { label: 'Eating out', current: 4000, target: 20000, drill: { level: 'payees', categoryId: 'c-eat' }, color: 'teal' },
     ]);
   });
 
   test('pacing-bars rollup items in the legacy array become one drillable row', async () => {
     const card = await one('markdown-card', md('pacing-bars', '[{"title":"House","budgets":["c-rent","c-power","c-gone"]},"c-eat"]'));
     expect(card.items).toEqual([
-      { label: 'House', current: 102500, target: 110000, drill: { level: 'categories', categoryIds: ['c-rent', 'c-power'] } },
-      { label: 'Eating out', current: 4000, target: 20000, drill: { level: 'payees', categoryId: 'c-eat' } },
+      { label: 'House', current: 102500, target: 110000, drill: { level: 'categories', categoryIds: ['c-rent', 'c-power'] }, color: 'blue' },
+      { label: 'Eating out', current: 4000, target: 20000, drill: { level: 'payees', categoryId: 'c-eat' }, color: 'teal' },
     ]);
   });
 
   test('pacing-bars allGroups: one row per visible expense group, then picked ids; income and hidden left out', async () => {
     const card = await one('markdown-card', md('pacing-bars', '{"categoryIds":["c-eat"],"allGroups":true}'));
     expect(card.items).toEqual([
-      { label: 'Bills', current: 102500, target: 110000, drill: { level: 'categories', categoryIds: ['c-rent', 'c-power'] } },
-      { label: 'Fun', current: 4000, target: 20000, drill: { level: 'categories', categoryIds: ['c-eat'] } },
-      { label: 'Eating out', current: 4000, target: 20000, drill: { level: 'payees', categoryId: 'c-eat' } },
+      { label: 'Bills', current: 102500, target: 110000, drill: { level: 'categories', categoryIds: ['c-rent', 'c-power'] }, color: 'blue' },
+      { label: 'Fun', current: 4000, target: 20000, drill: { level: 'categories', categoryIds: ['c-eat'] }, color: 'teal' },
+      { label: 'Eating out', current: 4000, target: 20000, drill: { level: 'payees', categoryId: 'c-eat' }, color: 'teal' },
     ]);
     const only = await one('markdown-card', md('pacing-bars', '{"categoryIds":[],"allGroups":true}'));
     expect(only.items.map((i) => i.label)).toEqual(['Bills', 'Fun']);
+  });
+
+  test('pacing-bars colours: a rollup is the group colour only when it is exactly that group; explicit colours win', async () => {
+    const colorOf = async (cfg) => (await one('markdown-card', md('pacing-bars', JSON.stringify(cfg)))).items.map((i) => i.color);
+    // Bills is blue, Fun teal by position.
+    expect(await colorOf([{ title: 'Part', budgets: ['c-rent'] }])).toEqual([undefined]);
+    expect(await colorOf([{ title: 'Mixed', budgets: ['c-rent', 'c-eat'] }])).toEqual([undefined]);
+    expect(await colorOf([{ title: 'All', budgets: ['c-rent', 'c-power'] }])).toEqual(['blue']);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'reports-colors-'));
+    const original = process.env.INSIGHTS_DATA_DIR;
+    process.env.INSIGHTS_DATA_DIR = dir;
+    try {
+      fs.writeFileSync(path.join(dir, 'mobile-colors.json'), JSON.stringify({ groups: { 'g-bills': 'red' }, categories: { 'c-power': 'pink' } }));
+      expect(await colorOf({ categoryIds: ['c-rent', 'c-power'], allGroups: true })).toEqual(['red', 'teal', 'red', 'pink']);
+    } finally {
+      if (original === undefined) delete process.env.INSIGHTS_DATA_DIR;
+      else process.env.INSIGHTS_DATA_DIR = original;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('pacing-bars groupIds: only those groups in that order, unknown/duplicate/income ids ignored, picked rows after', async () => {
@@ -673,8 +693,8 @@ describe('breakdown drills', () => {
     const donut = await one('markdown-card', md('spending-breakdown-donut'));
     expect(donut.chart).toBe('donut');
     expect(donut.items).toEqual([
-      { label: 'Bills', value: 102500, drill: { level: 'categories', categoryIds: ['c-rent', 'c-power'] } },
-      { label: 'Fun', value: 4000, drill: { level: 'categories', categoryIds: ['c-eat'] } },
+      { label: 'Bills', value: 102500, drill: { level: 'categories', categoryIds: ['c-rent', 'c-power'] }, color: 'blue' },
+      { label: 'Fun', value: 4000, drill: { level: 'categories', categoryIds: ['c-eat'] }, color: 'teal' },
     ]);
     const tree = await one('markdown-card', md('spending-treemap'));
     expect(tree.chart).toBe('treemap');
@@ -686,7 +706,7 @@ describe('breakdown drills', () => {
     client.getCategoryGroups.mockResolvedValue(GROUPS.map((g) => (g.id === 'g-fun' ? { ...g, categories: [...g.categories, { id: 'c-hid', name: 'Hidden', hidden: true }] } : g)));
     const body = await buildReports({ client, now: NOW });
     expectValid(body);
-    expect(body.cards[0].items).toEqual([{ label: 'Fun', value: 4000, drill: { level: 'categories', categoryIds: ['c-eat'] } }]);
+    expect(body.cards[0].items).toEqual([{ label: 'Fun', value: 4000, drill: { level: 'categories', categoryIds: ['c-eat'] }, color: 'teal' }]);
   });
 
   test('a user-made Transfers group is left out and a group with no visible category has no drill', async () => {
@@ -698,9 +718,10 @@ describe('breakdown drills', () => {
         return { data: [{ groupId: 'g1', amountCents: -500 }, { groupId: 'g2', amountCents: -900 }, { groupId: 'g3', amountCents: -100 }] };
       }),
     };
-    const ctx = { client, month: '2026-11', categoryGroups: async () => [{ id: 'g1', name: 'Home', categories: [{ id: 'c1' }] }, { id: 'g3', name: 'Empty', categories: [{ id: 'c9', hidden: true }] }] };
+    const groups = [{ id: 'g1', name: 'Home', categories: [{ id: 'c1' }] }, { id: 'g3', name: 'Empty', categories: [{ id: 'c9', hidden: true }] }];
+    const ctx = { client, month: '2026-11', categoryGroups: async () => groups, colors: async () => createColorResolver(groups) };
     const card = await insightsBuilder('donut').build(ctx, []);
-    expect(card.items).toEqual([{ label: 'Home', value: 500, drill: { level: 'categories', categoryIds: ['c1'] } }, { label: 'Empty', value: 100 }]);
+    expect(card.items).toEqual([{ label: 'Home', value: 500, drill: { level: 'categories', categoryIds: ['c1'] }, color: 'blue' }, { label: 'Empty', value: 100, color: 'teal' }]);
   });
 
   test('group drills cap at 200 ids', async () => {

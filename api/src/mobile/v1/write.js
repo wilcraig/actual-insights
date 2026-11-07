@@ -2,6 +2,7 @@ const { scopedClient: getActualClient } = require('./hidden');
 const { MAX_BUDGETED, MAX_MONEY, MAX_NOTE, badRequest, notFound, isHidden, isIncome, monthWithinWindow } = require('./common');
 const { readTransactionRow, buildTransactionDetail, budgetCategory, budgetTotals } = require('./read');
 const { appendAudit } = require('./audit');
+const { loadColorResolver } = require('./colors');
 
 // The write side of /api/mobile/v1. These change a real budget, so every
 // operation: runs alone (one write at a time, server-wide), validates
@@ -271,7 +272,8 @@ async function setBudgetedAmount({ tokenId, month, categoryId, budgeted }) {
 
     const fresh = await client.getBudgetMonth(month);
     const line = findLine(fresh, categoryId);
-    return { schema: 1, month, categories: [budgetCategory(line || { ...current, budgeted })], totals: budgetTotals(fresh) };
+    const colors = await loadColorResolver(client);
+    return { schema: 1, month, categories: [budgetCategory(line || { ...current, budgeted }, colors)], totals: budgetTotals(fresh) };
   });
 }
 
@@ -315,7 +317,8 @@ async function moveBudget({ tokenId, month, from, to, amount }) {
 
     const fresh = await client.getBudgetMonth(month);
     const lines = [from, to].map((id, i) => findLine(fresh, id) || { ...(i === 0 ? fromLine : toLine), budgeted: i === 0 ? fromAfter : toAfter });
-    return { schema: 1, month, categories: lines.map(budgetCategory), totals: budgetTotals(fresh) };
+    const colors = await loadColorResolver(client);
+    return { schema: 1, month, categories: lines.map((l) => budgetCategory(l, colors)), totals: budgetTotals(fresh) };
   });
 }
 

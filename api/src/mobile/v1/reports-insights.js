@@ -85,13 +85,26 @@ function parsePacingConfig(config) {
 
 // A single category keeps its long-standing mobile numbers: spent never goes
 // below zero before the carryover-aware available amount is worked out.
-function categoryRow(c) {
+function categoryRow(c, colors) {
   const spent = Math.max(0, spentOf(c));
-  return { label: c.name, current: spent, target: Math.max(0, (c.balance ?? 0) + spent), drill: { level: 'payees', categoryId: c.id } };
+  return { label: c.name, current: spent, target: Math.max(0, (c.balance ?? 0) + spent), drill: { level: 'payees', categoryId: c.id }, ...colors.categoryField(c.id) };
 }
 
-function rollupRow(title, members) {
+// A rollup that is exactly one group's visible categories (all of them, none
+// from elsewhere) carries that group's colour; any other mix has none.
+function rollupColor(members, colors) {
+  const groupIds = new Set(members.map((c) => colors.groupOfCategory.get(c.id)));
+  if (groupIds.size !== 1) return {};
+  const [groupId] = groupIds;
+  if (groupId === undefined || !colors.hasGroup(groupId)) return {};
+  const ids = new Set(members.map((c) => c.id));
+  const whole = colors.groupCategories(groupId);
+  return ids.size === whole.length && whole.every((id) => ids.has(id)) ? { color: colors.group(groupId) } : {};
+}
+
+function rollupRow(title, members, colors) {
   return {
+    ...rollupColor(members, colors),
     label: title,
     current: Math.max(0, members.reduce((sum, c) => sum + spentOf(c), 0)),
     target: Math.max(0, members.reduce((sum, c) => sum + availableOf(c), 0)),
@@ -102,6 +115,7 @@ function rollupRow(title, members) {
 async function pacingBars(ctx, config) {
   const { items: picked, allGroups, groupIds } = parsePacingConfig(config);
   const budgetMonth = await ctx.budgetMonth();
+  const colors = await ctx.colors();
   const byId = new Map();
   for (const group of budgetMonth.categoryGroups || []) for (const c of group.categories || []) byId.set(c.id, c);
   const items = [];
@@ -120,7 +134,7 @@ async function pacingBars(ctx, config) {
     const order = groupIds ? [...new Set(groupIds)] : [...eligible.keys()];
     for (const id of order) {
       const g = eligible.get(id);
-      if (g) items.push(rollupRow(g.name, g.members));
+      if (g) items.push(rollupRow(g.name, g.members, colors));
     }
   }
 
@@ -129,10 +143,10 @@ async function pacingBars(ctx, config) {
       if (typeof item === 'string') {
         const c = byId.get(item);
         if (!c) continue;
-        items.push(categoryRow(c));
+        items.push(categoryRow(c, colors));
       } else {
         const members = item.budgets.map((id) => byId.get(id)).filter(Boolean);
-        if (members.length > 0) items.push(rollupRow(item.title, members));
+        if (members.length > 0) items.push(rollupRow(item.title, members, colors));
       }
     }
   } else if (!allGroups) {
@@ -140,7 +154,7 @@ async function pacingBars(ctx, config) {
     for (const group of budgetMonth.categoryGroups || []) {
       if (isIncomeGroup(group) || isTransferGroup(group)) continue;
       for (const c of group.categories || []) {
-        const row = categoryRow(c);
+        const row = categoryRow(c, colors);
         if (row.target > 0) items.push(row);
       }
     }
@@ -265,13 +279,14 @@ async function savingsRate(ctx, config) {
 // Transfers group left out, each slice opening that group's categories.
 async function spendingDonut(ctx, config) {
   const { monthStart, monthEnd } = monthBounds(ctx.month);
-  const [slices, drills] = await Promise.all([
+  const [slices, drills, colors] = await Promise.all([
     breakdownByGroups(ctx.client, baseFilterFor(dateRange(monthStart, monthEnd)), asIdList(config)),
     groupDrills(ctx),
+    ctx.colors(),
   ]);
   const items = slices
     .filter((s) => !TRANSFER_GROUP.test(String(s.label).trim()))
-    .map((s) => ({ label: s.label, value: s.amountCents, ...(drills.has(s.id) ? { drill: drills.get(s.id) } : {}) }));
+    .map((s) => ({ label: s.label, value: s.amountCents, ...(drills.has(s.id) ? { drill: drills.get(s.id) } : {}), ...colors.groupField(s.id) }));
   return { kind: 'breakdown', chart: 'donut', format: 'money', items, subtitle: ctx.month };
 }
 

@@ -161,9 +161,9 @@ describe('GET /accounts', () => {
     await withServer(async (base) => {
       const body = await json(await get(base, token, '/accounts'), 'accountsResponse');
       expect(body.accounts).toEqual([
-        { id: 'a-chk', name: 'Everyday Checking', balance: 312450, onBudget: true },
-        { id: 'a-sav', name: 'Rainy Day Savings', balance: 1050000, onBudget: true },
-        { id: 'a-ret', name: 'Retirement', balance: 9900000, onBudget: false },
+        { id: 'a-chk', name: 'Everyday Checking', balance: 312450, onBudget: true, groupId: null },
+        { id: 'a-sav', name: 'Rainy Day Savings', balance: 1050000, onBudget: true, groupId: null },
+        { id: 'a-ret', name: 'Retirement', balance: 9900000, onBudget: false, groupId: null },
       ]);
     });
   });
@@ -186,7 +186,7 @@ describe('GET /transactions', () => {
       expect(body.transactions.map((t) => t.id)).toEqual(['t-01', 't-04x', 't-04', 't-03', 't-02', 't-05', 't-07', 't-09', 't-10', 't-11']);
       expect(body.nextCursor).toBeNull();
       const byId = Object.fromEntries(body.transactions.map((t) => [t.id, t]));
-      expect(byId['t-01']).toEqual({ id: 't-01', date: '2026-11-11', accountId: 'a-chk', accountName: 'Everyday Checking', payee: 'Example Grocer', amount: -8423, category: { id: 'c-groc', name: 'Groceries' }, categoryGroup: 'Usual Expenses', notes: null, cleared: true, transfer: false, split: false });
+      expect(byId['t-01']).toEqual({ id: 't-01', date: '2026-11-11', accountId: 'a-chk', accountName: 'Everyday Checking', payee: 'Example Grocer', amount: -8423, category: { id: 'c-groc', name: 'Groceries' }, categoryGroup: 'Usual Expenses', notes: null, cleared: true, transfer: false, split: false, color: 'blue' });
       expect(byId['t-04']).toMatchObject({ transfer: true, payee: 'Transfer: Everyday Checking', category: null });
       expect(byId['t-05'].split).toBe(true);
       expect(byId['t-03'].notes).toBeNull();
@@ -334,7 +334,7 @@ describe('GET /transactions/:id', () => {
     const { token } = await newToken();
     await withServer(async (base) => {
       const plain = (await json(await get(base, token, '/transactions/t-02'), 'transactionDetailResponse')).transaction;
-      expect(plain).toEqual({ id: 't-02', date: '2026-11-10', accountId: 'a-chk', accountName: 'Everyday Checking', payee: 'Example Hardware', amount: -2399, category: null, categoryGroup: null, notes: 'screws #house #diy #house', cleared: false, reconciled: false, transfer: false, split: false, importedPayee: 'EXAMPLE HDWR #1234', importedId: 'SFIN-0001', recurring: 'Hardware club', tags: ['house', 'diy'], splits: [], transferAccountName: null });
+      expect(plain).toEqual({ id: 't-02', date: '2026-11-10', accountId: 'a-chk', accountName: 'Everyday Checking', payee: 'Example Hardware', amount: -2399, category: null, categoryGroup: null, notes: 'screws #house #diy #house', cleared: false, reconciled: false, transfer: false, split: false, importedPayee: 'EXAMPLE HDWR #1234', importedId: 'SFIN-0001', recurring: 'Hardware club', tags: ['house', 'diy'], splits: [], transferAccountName: null, color: null });
       const manual = (await json(await get(base, token, '/transactions/t-01'), 'transactionDetailResponse')).transaction;
       expect(manual).toMatchObject({ categoryGroup: 'Usual Expenses', importedPayee: null, importedId: null, recurring: null, tags: [], reconciled: false });
       const split = (await json(await get(base, token, '/transactions/t-05'), 'transactionDetailResponse')).transaction;
@@ -371,9 +371,9 @@ describe('GET /categories and /budget/:month', () => {
     await withServer(async (base) => {
       const body = await json(await get(base, token, '/categories'), 'categoriesResponse');
       expect(body.groups).toEqual([
-        { id: 'g-usual', name: 'Usual Expenses', isIncome: false, categories: [{ id: 'c-groc', name: 'Groceries' }, { id: 'c-fuel', name: 'Fuel' }] },
-        { id: 'g-empty', name: 'Nothing here', isIncome: false, categories: [] },
-        { id: 'g-income', name: 'Income', isIncome: true, categories: [{ id: 'c-pay', name: 'Paycheck' }] },
+        { id: 'g-usual', name: 'Usual Expenses', isIncome: false, color: 'blue', categories: [{ id: 'c-groc', name: 'Groceries', color: 'blue' }, { id: 'c-fuel', name: 'Fuel', color: 'blue' }] },
+        { id: 'g-empty', name: 'Nothing here', isIncome: false, color: 'teal', categories: [] },
+        { id: 'g-income', name: 'Income', isIncome: true, color: 'green', categories: [{ id: 'c-pay', name: 'Paycheck', color: 'green' }] },
       ]);
     });
   });
@@ -387,9 +387,10 @@ describe('GET /categories and /budget/:month', () => {
         {
           id: 'g-usual', name: 'Usual Expenses', budgeted: 63000, spent: -12300, balance: 50700,
           categories: [
-            { id: 'c-groc', name: 'Groceries', budgeted: 45000, spent: -9500, balance: 35500, carryover: false },
-            { id: 'c-fuel', name: 'Fuel', budgeted: 18000, spent: -2800, balance: 15200, carryover: true },
+            { id: 'c-groc', name: 'Groceries', budgeted: 45000, spent: -9500, balance: 35500, carryover: false, color: 'blue' },
+            { id: 'c-fuel', name: 'Fuel', budgeted: 18000, spent: -2800, balance: 15200, carryover: true, color: 'blue' },
           ],
+          color: 'blue',
         },
       ]);
       // Actual reports totalBudgeted negative; the contract's is the plain sum.
@@ -930,7 +931,7 @@ describe('PUT /budget/:month/categories/:id', () => {
       expect(res.status).toBe(200);
       const body = await json(res, 'budgetChangeResponse');
       expect(body.month).toBe('2026-11');
-      expect(body.categories).toEqual([{ id: 'c-groc', name: 'Groceries', budgeted: 47500, spent: -9500, balance: 38000, carryover: false }]);
+      expect(body.categories).toEqual([{ id: 'c-groc', name: 'Groceries', budgeted: 47500, spent: -9500, balance: 38000, carryover: false, color: 'blue' }]);
       expect(body.totals.budgeted).toBe(65500);
       expect(client.setBudgetAmount).toHaveBeenCalledWith('2026-11', 'c-groc', 47500);
       expect(client.sync).toHaveBeenCalledTimes(1);
@@ -975,8 +976,8 @@ describe('POST /budget/:month/move', () => {
       expect(res.status).toBe(200);
       const body = await json(res, 'budgetChangeResponse');
       expect(body.categories).toEqual([
-        { id: 'c-fuel', name: 'Fuel', budgeted: 15500, spent: -2800, balance: 12700, carryover: true },
-        { id: 'c-groc', name: 'Groceries', budgeted: 47500, spent: -9500, balance: 38000, carryover: false },
+        { id: 'c-fuel', name: 'Fuel', budgeted: 15500, spent: -2800, balance: 12700, carryover: true, color: 'blue' },
+        { id: 'c-groc', name: 'Groceries', budgeted: 47500, spent: -9500, balance: 38000, carryover: false, color: 'blue' },
       ]);
       expect(client.batchBudgetUpdates).toHaveBeenCalledTimes(1);
       expect(client.state.calls).toEqual([['batch'], ['setBudgetAmount', '2026-11', 'c-fuel', 15500], ['setBudgetAmount', '2026-11', 'c-groc', 47500]]);

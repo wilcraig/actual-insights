@@ -90,7 +90,8 @@
         "id",
         "name",
         "balance",
-        "onBudget"
+        "onBudget",
+        "groupId"
       ],
       "properties": {
         "id": {
@@ -111,17 +112,29 @@
         },
         "onBudget": {
           "type": "boolean"
+        },
+        "groupId": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The account group (as set up in Actual's sidebar) this account belongs to, or null."
         }
       }
     },
     "accountsResponse": {
-      "description": "GET /accounts. Open accounts, on-budget first then off-budget, each by name, at most 100.",
+      "description": "GET /accounts. Open visible accounts in Actual's own sidebar order (so account groups stay contiguous), on-budget first then off-budget, at most 100. groups lists the account groups in Actual's order with their summed balances; accounts reference them by groupId. Ungrouped accounts have groupId null.",
       "type": "object",
       "additionalProperties": false,
       "required": [
         "schema",
         "generatedAt",
-        "accounts"
+        "accounts",
+        "groups"
       ],
       "properties": {
         "schema": {
@@ -135,6 +148,38 @@
           "maxItems": 100,
           "items": {
             "$ref": "#/definitions/account"
+          }
+        },
+        "groups": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "balance"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/definitions/id"
+              },
+              "name": {
+                "$ref": "#/definitions/name"
+              },
+              "balance": {
+                "oneOf": [
+                  {
+                    "$ref": "#/definitions/money"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Sum of the group's visible accounts; null if any balance is unknown."
+              }
+            }
           }
         }
       }
@@ -170,7 +215,8 @@
         "notes",
         "cleared",
         "transfer",
-        "split"
+        "split",
+        "color"
       ],
       "properties": {
         "id": {
@@ -239,6 +285,17 @@
             }
           ],
           "description": "Name of the category's group, null when uncategorized."
+        },
+        "color": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/colorKey"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Effective colour of the transaction's category (explicit category colour, else its group's); null when uncategorized."
         }
       }
     },
@@ -292,7 +349,8 @@
         "id",
         "name",
         "isIncome",
-        "categories"
+        "categories",
+        "color"
       ],
       "properties": {
         "id": {
@@ -308,8 +366,11 @@
           "type": "array",
           "maxItems": 200,
           "items": {
-            "$ref": "#/definitions/categoryRef"
+            "$ref": "#/definitions/categoryItem"
           }
+        },
+        "color": {
+          "$ref": "#/definitions/colorKey"
         }
       }
     },
@@ -347,7 +408,8 @@
         "budgeted",
         "spent",
         "balance",
-        "carryover"
+        "carryover",
+        "color"
       ],
       "properties": {
         "id": {
@@ -368,6 +430,9 @@
         },
         "carryover": {
           "type": "boolean"
+        },
+        "color": {
+          "$ref": "#/definitions/colorKey"
         }
       }
     },
@@ -380,7 +445,8 @@
         "budgeted",
         "spent",
         "balance",
-        "categories"
+        "categories",
+        "color"
       ],
       "properties": {
         "id": {
@@ -404,6 +470,9 @@
           "items": {
             "$ref": "#/definitions/budgetCategory"
           }
+        },
+        "color": {
+          "$ref": "#/definitions/colorKey"
         }
       }
     },
@@ -859,6 +928,9 @@
                   },
                   "drill": {
                     "$ref": "#/definitions/drill"
+                  },
+                  "color": {
+                    "$ref": "#/definitions/colorKey"
                   }
                 }
               }
@@ -1464,6 +1536,9 @@
         },
         "drill": {
           "$ref": "#/definitions/drill"
+        },
+        "color": {
+          "$ref": "#/definitions/colorKey"
         }
       }
     },
@@ -1586,7 +1661,8 @@
         "recurring",
         "tags",
         "splits",
-        "transferAccountName"
+        "transferAccountName",
+        "color"
       ],
       "properties": {
         "id": {
@@ -1748,6 +1824,17 @@
             }
           ],
           "description": "For transfers, the account on the other side."
+        },
+        "color": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/colorKey"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Effective colour of the transaction's category (explicit category colour, else its group's); null when uncategorized."
         }
       }
     },
@@ -1885,6 +1972,9 @@
         },
         "drill": {
           "$ref": "#/definitions/drill"
+        },
+        "color": {
+          "$ref": "#/definitions/colorKey"
         }
       }
     },
@@ -2192,6 +2282,143 @@
         },
         "ok": {
           "const": true
+        }
+      }
+    },
+    "colorKey": {
+      "type": "string",
+      "enum": [
+        "blue",
+        "teal",
+        "green",
+        "lime",
+        "yellow",
+        "orange",
+        "red",
+        "pink",
+        "purple",
+        "indigo",
+        "brown",
+        "gray"
+      ],
+      "description": "One of 12 fixed palette colours; the hex values per key (light and dark) are in shared/fixtures/palette.json and must match in every app."
+    },
+    "categoryItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "color"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/id"
+        },
+        "name": {
+          "$ref": "#/definitions/name"
+        },
+        "color": {
+          "$ref": "#/definitions/colorKey"
+        }
+      }
+    },
+    "colorsResponse": {
+      "description": "GET /colors (read scope): every category group and category with its effective colour, for the colour editor. PUT /colors/groups/<id> and PUT /colors/categories/<id> (write scope) take {\"color\": <colorKey>|null} (null returns to the automatic default) and answer okResponse.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "generatedAt",
+        "groups",
+        "categories"
+      ],
+      "properties": {
+        "schema": {
+          "const": 1
+        },
+        "generatedAt": {
+          "$ref": "#/definitions/generatedAt"
+        },
+        "groups": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "color",
+              "explicit"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/definitions/id"
+              },
+              "name": {
+                "$ref": "#/definitions/name"
+              },
+              "color": {
+                "$ref": "#/definitions/colorKey"
+              },
+              "explicit": {
+                "type": "boolean",
+                "description": "True when the user picked this colour; false when it is the automatic default (group: by position; category: its group's colour)."
+              }
+            }
+          }
+        },
+        "categories": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "groupId",
+              "color",
+              "explicit"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/definitions/id"
+              },
+              "name": {
+                "$ref": "#/definitions/name"
+              },
+              "groupId": {
+                "$ref": "#/definitions/id"
+              },
+              "color": {
+                "$ref": "#/definitions/colorKey"
+              },
+              "explicit": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    },
+    "colorSetRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "color"
+      ],
+      "properties": {
+        "color": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/colorKey"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     }
