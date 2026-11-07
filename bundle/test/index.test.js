@@ -20,6 +20,14 @@ vi.mock('../src/widgets/PacingBars.svelte', () => ({
   },
 }));
 let lastSpendingHeatmapProps = null;
+let lastRadarProps = null;
+vi.mock('../src/widgets/SubscriptionRadar.svelte', () => ({
+  default: class {
+    constructor({ props }) {
+      lastRadarProps = props;
+    }
+  },
+}));
 vi.mock('../src/widgets/SpendingHeatmap.svelte', () => ({
   default: class {
     constructor({ props }) {
@@ -148,4 +156,18 @@ test('pacing-bars mount callback accepts the legacy array and the {categoryIds, 
 
   callback(document.createElement('div'), null);
   expect(lastPacingBarsProps).toEqual({ items: [], allGroups: false });
+});
+
+test('subscription-radar mount callback accepts null and the {layout, excludeCategoryIds} object', async () => {
+  vi.resetModules();
+  const { mountWidget } = await import('../src/mount');
+  await import('../src/index.js');
+  const [, callback] = mountWidget.mock.calls.find(([prefix]) => prefix === '{{INSIGHTS:subscription-radar:');
+
+  callback(document.createElement('div'), null);
+  expect(lastRadarProps).toEqual({ layout: 'horizontal', excludeCategoryIds: [] });
+  callback(document.createElement('div'), { layout: 'vertical', excludeCategoryIds: ['c1', 5] });
+  expect(lastRadarProps).toEqual({ layout: 'vertical', excludeCategoryIds: ['c1'] });
+  callback(document.createElement('div'), { layout: 'weird' });
+  expect(lastRadarProps.layout).toBe('horizontal');
 });

@@ -1,6 +1,11 @@
 <script>
   import { scaleTime } from 'd3';
   import { fetchApi } from '../api-client';
+  import { excludeCategories, layoutVertical } from './radar-data';
+
+  // layout: 'horizontal' (default, the original timeline) or 'vertical'.
+  // excludeCategoryIds: renewals in these categories never appear.
+  let { layout: layoutMode = 'horizontal', excludeCategoryIds = [] } = $props();
 
   // Same categorical chart palette + fallback every other group-colored
   // widget uses, byte-for-byte (AccountBalancesChart.svelte's convention,
@@ -148,7 +153,7 @@
   // also resolved to index 0.
   let sortedItems = $derived.by(() => {
     if (!items) return [];
-    return [...items].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    return [...excludeCategories(items, excludeCategoryIds)].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   });
 
   let coloredItems = $derived.by(() => {
@@ -234,7 +239,24 @@
     return { dots, axisY, height, ticks };
   });
 
-  let isEmpty = $derived(items !== null && items.length === 0);
+  let isEmpty = $derived(items !== null && sortedItems.length === 0);
+
+  const AXIS_X = 56;
+  let vertical = $derived(
+    layoutVertical(coloredItems, {
+      today,
+      windowDays: WINDOW_DAYS,
+      width,
+      measure: textWidth,
+      axisX: AXIS_X,
+      amountText: formatAmount,
+    }),
+  );
+  let verticalWidth = $derived(Math.max(containerWidth || 320, 240));
+
+  function shortDate(dateStr) {
+    return parseDateOnly(dateStr).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
 </script>
 
 <div class="actualmint-subscription-radar" bind:clientWidth={containerWidth}>
@@ -244,6 +266,43 @@
     <p class="radar-loading">Loading subscription renewal radar…</p>
   {:else if isEmpty}
     <p class="radar-empty">Nothing upcoming in the next 30 days.</p>
+  {:else if layoutMode === 'vertical'}
+    <!-- The graph is decorative for assistive tech: the list below is its
+         text equivalent, one readable item per renewal. -->
+    <svg
+      class="radar-svg radar-svg--vertical"
+      width={verticalWidth}
+      height={vertical.height}
+      viewBox="0 0 {verticalWidth} {vertical.height}"
+      aria-hidden="true"
+    >
+      <line class="radar-axis" x1={vertical.axisX} y1={vertical.axisTop} x2={vertical.axisX} y2={vertical.axisBottom} />
+      {#each vertical.ticks as tick (tick.day)}
+        <line class="radar-tick" x1={vertical.axisX - 4} y1={tick.y} x2={vertical.axisX} y2={tick.y} />
+        <text class="radar-tick-label" x={vertical.axisX - 8} y={tick.y + 3} text-anchor="end">{shortDate(formatDate(addDays(today, tick.day)))}</text>
+      {/each}
+      {#each vertical.rows as row (coloredItems[row.index].key)}
+        {@const item = coloredItems[row.index]}
+        <g class="radar-item">
+          {#if row.displaced}
+            <polyline class="radar-stem" points="{vertical.axisX},{row.dotY} {vertical.axisX + 10},{row.dotY} {vertical.axisX + 14},{row.labelY - 4} {row.labelX - 4},{row.labelY - 4}" fill="none" stroke={item.color} />
+          {:else}
+            <line class="radar-stem" x1={vertical.axisX} y1={row.dotY} x2={row.labelX - 4} y2={row.dotY} stroke={item.color} />
+          {/if}
+          <circle class="radar-dot" data-schedule-id={item.scheduleId} cx={vertical.axisX} cy={row.dotY} r={DOT_RADIUS} fill={item.color} />
+          <text class="radar-label" x={row.labelX} y={row.labelY}>
+            <tspan class="radar-label-name">{row.name}</tspan>
+            <tspan class="radar-label-amount" class:radar-label-amount--deposit={item.amountCents > 0} dx="4">{row.amount}</tspan>
+          </text>
+          <text class="radar-tick-label" x={row.labelX} y={row.dateY}>{shortDate(item.date)}</text>
+        </g>
+      {/each}
+    </svg>
+    <ol class="radar-list">
+      {#each coloredItems as item (item.key)}
+        <li><time datetime={item.date}>{item.date}</time>: {item.payeeName}, {formatAmount(item.amountCents)}</li>
+      {/each}
+    </ol>
   {:else}
     <svg
       class="radar-svg"
@@ -300,6 +359,13 @@
 
   .radar-svg {
     display: block;
+  }
+
+  .radar-list {
+    margin: 0;
+    padding-left: 1.25rem;
+    font-size: 0.8rem;
+    color: #374151;
   }
 
   .radar-axis,

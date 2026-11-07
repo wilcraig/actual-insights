@@ -454,5 +454,19 @@
       }
     ],
     "defaultId": "page-main"
+  },
+  "transactionSplitRequest": {
+    "splits": [
+      {
+        "category": "cat-groceries",
+        "amount": -1500,
+        "notes": null
+      },
+      {
+        "category": "cat-fuel",
+        "amount": -899,
+        "notes": "gas for the mower"
+      }
+    ]
   }
 }

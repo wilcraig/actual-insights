@@ -78,7 +78,7 @@ test('lists a one-time schedule whose next_date falls in the remaining days of t
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.items).toEqual([
-      { scheduleId: 'sched1', payeeName: 'Acme Gym', date: '2026-10-30', amountCents: -5000, groupName: null },
+      { scheduleId: 'sched1', payeeName: 'Acme Gym', date: '2026-10-30', amountCents: -5000, groupName: null, categoryId: null },
     ]);
   });
 });
@@ -102,7 +102,7 @@ test('lists a recurring schedule once per occurrence date within the remaining d
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.items).toEqual([
-      { scheduleId: 'sched1', payeeName: 'Streaming Service', date: '2026-10-29', amountCents: -2000, groupName: null },
+      { scheduleId: 'sched1', payeeName: 'Streaming Service', date: '2026-10-29', amountCents: -2000, groupName: null, categoryId: null },
     ]);
   });
 });
@@ -336,7 +336,7 @@ test('a one-time schedule with a null next_date is skipped instead of crashing t
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.items).toEqual([
-      { scheduleId: 'fine', payeeName: 'Acme Gym', date: '2026-10-28', amountCents: -2000, groupName: null },
+      { scheduleId: 'fine', payeeName: 'Acme Gym', date: '2026-10-28', amountCents: -2000, groupName: null, categoryId: null },
     ]);
   });
 });
@@ -375,7 +375,7 @@ test('a schedule whose rule sets a category resolves groupName from that categor
     const res = await fetch(`${base}/api/bills-timeline?month=2026-10`, { headers: AUTH_HEADERS });
     const body = await res.json();
     expect(body.items).toEqual([
-      { scheduleId: 'sched1', payeeName: 'Acme Gym', date: '2026-10-30', amountCents: -5000, groupName: 'Subscriptions' },
+      { scheduleId: 'sched1', payeeName: 'Acme Gym', date: '2026-10-30', amountCents: -5000, groupName: 'Subscriptions', categoryId: 'catA' },
     ]);
   });
 });

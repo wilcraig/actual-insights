@@ -298,3 +298,49 @@ test('renders the inline error treatment when fetch throws', async () => {
   const error = target.querySelector('[role="alert"]');
   expect(error).not.toBeNull();
 });
+
+test('excludeCategoryIds hides those renewals; an item with an unknown category stays', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(2026, 9, 1));
+  fetchApi.mockImplementation(() => Promise.resolve(jsonResponse({ items: [
+    { scheduleId: 's1', payeeName: 'Gym', date: '2026-10-05', amountCents: -5000, groupName: null, categoryId: 'cA' },
+    { scheduleId: 's2', payeeName: 'Music', date: '2026-10-06', amountCents: -1000, groupName: null, categoryId: 'cB' },
+    { scheduleId: 's3', payeeName: 'Mystery', date: '2026-10-07', amountCents: -700, groupName: null, categoryId: null },
+  ] })));
+  const target = mountWidget({ excludeCategoryIds: ['cA'] });
+  await flush();
+  const ids = [...target.querySelectorAll('.radar-dot')].map((d) => d.getAttribute('data-schedule-id'));
+  expect(ids).toEqual(['s2', 's3']);
+});
+
+test('vertical layout draws a dot per renewal on one axis plus a list equivalent, and the svg is hidden from AT', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(2026, 9, 1));
+  fetchApi.mockImplementation(() => Promise.resolve(jsonResponse({ items: [
+    { scheduleId: 's1', payeeName: 'Gym', date: '2026-10-05', amountCents: -5000, groupName: null, categoryId: null },
+    { scheduleId: 's2', payeeName: 'Music', date: '2026-10-05', amountCents: -1000, groupName: null, categoryId: null },
+  ] })));
+  const target = mountWidget({ layout: 'vertical' });
+  await flush();
+  const dots = [...target.querySelectorAll('.radar-dot')];
+  expect(dots).toHaveLength(2);
+  expect(new Set(dots.map((d) => d.getAttribute('cx'))).size).toBe(1);
+  expect(new Set(dots.map((d) => d.getAttribute('cy'))).size).toBe(1);
+  expect(target.querySelector('svg').getAttribute('aria-hidden')).toBe('true');
+  const items = [...target.querySelectorAll('ol.radar-list li')].map((li) => li.textContent);
+  expect(items).toHaveLength(2);
+  expect(items[0]).toContain('Gym');
+  expect(items[0]).toContain('2026-10-05');
+});
+
+test('horizontal layout is unchanged: no list, svg labelled', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(2026, 9, 1));
+  fetchApi.mockImplementation(() => Promise.resolve(jsonResponse({ items: [
+    { scheduleId: 's1', payeeName: 'Gym', date: '2026-10-05', amountCents: -5000, groupName: null },
+  ] })));
+  const target = mountWidget();
+  await flush();
+  expect(target.querySelector('ol.radar-list')).toBeNull();
+  expect(target.querySelector('svg').getAttribute('role')).toBe('img');
+});

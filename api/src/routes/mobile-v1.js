@@ -4,10 +4,10 @@ const { getActualClient, syncIfDue } = require('../actual-client');
 const { touchToken } = require('../mobile-tokens-store');
 const { bearerAuth, rateLimit, resetRateLimits, READ_LIMIT, WRITE_LIMIT } = require('../mobile/http');
 const { createReadCache } = require('../mobile/v1/cache');
-const { MONTH_PATTERN, ID_PATTERN, MAX_NOTE, HttpError, badRequest, notFound, isValidId, monthWithinWindow } = require('../mobile/v1/common');
+const { MONTH_PATTERN, ID_PATTERN, MAX_NOTE, MAX_MONEY, HttpError, badRequest, notFound, isValidId, monthWithinWindow } = require('../mobile/v1/common');
 const { MAX_LIMIT, DEFAULT_LIMIT, CURSOR_PATTERN, buildCurrency, buildAccounts, buildTransactions, buildCategories, buildBudgetMonth, buildTransactionDetail } = require('../mobile/v1/read');
 const { buildSpending } = require('../mobile/v1/spending');
-const { updateTransactionFields, setBudgetedAmount, moveBudget } = require('../mobile/v1/write');
+const { updateTransactionFields, splitTransactionLines, removeSplit, setBudgetedAmount, moveBudget } = require('../mobile/v1/write');
 
 // /api/mobile/v1: the native client API (contract: native-v1.schema.json in
 // the Chipmunk repo, copied under api/test/fixtures). Mounted BEFORE the
@@ -277,6 +277,30 @@ router.post('/transactions/:id', writeLimit, requireWrite, (req, res, next) => {
   }
   parseJson(req, res, (err) => (err ? next(err) : updateTransaction(req, res, next)));
 });
+
+// Up to 50 lines of {category, amount, notes}: bigger than the 2kb of the other
+// bodies, still small. Strict like the schema: exactly these keys, nothing else.
+const parseSplitJson = express.json({ limit: '32kb' });
+
+router.put('/transactions/:id/splits', writeLimit, requireWrite, parseSplitJson, write((req) => {
+  const transactionId = pathId(req.params.id);
+  const { splits } = strictBody(req, ['splits']);
+  if (!Array.isArray(splits) || splits.length < 2 || splits.length > 50) throw badRequest();
+  const lines = splits.map((line) => {
+    if (!line || typeof line !== 'object' || Array.isArray(line)) throw badRequest();
+    const keys = Object.keys(line);
+    if (keys.length !== 3 || !['category', 'amount', 'notes'].every((k) => keys.includes(k))) throw badRequest();
+    if (!isValidId(line.category) || !isCents(line.amount, -MAX_MONEY, MAX_MONEY) || line.amount === 0) throw badRequest();
+    if (line.notes !== null && (typeof line.notes !== 'string' || line.notes.length > MAX_NOTE)) throw badRequest();
+    return { category: line.category, amount: line.amount, notes: line.notes };
+  });
+  return () => splitTransactionLines({ tokenId: req.deviceToken.id, transactionId, splits: lines });
+}));
+
+router.delete('/transactions/:id/splits', writeLimit, requireWrite, write((req) => {
+  const transactionId = pathId(req.params.id);
+  return () => removeSplit({ tokenId: req.deviceToken.id, transactionId });
+}));
 
 router.put('/budget/:month/categories/:id', writeLimit, requireWrite, parseJson, write((req) => {
   const month = pathMonth(req);
