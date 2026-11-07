@@ -381,7 +381,7 @@ async function accountBalanceList(ctx, config) {
     })
   );
   if (showTotal) rows.push({ title: 'Total', value: rows.reduce((sum, r) => sum + r.value, 0) });
-  return { kind: 'list', rows };
+  return { kind: 'list', rows, signed: true };
 }
 
 // The same numbers as SpendingSankey: this month's cash flow.

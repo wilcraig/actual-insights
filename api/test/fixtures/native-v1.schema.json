@@ -1017,6 +1017,10 @@
                   }
                 }
               }
+            },
+            "signed": {
+              "description": "When true the amounts are coloured by sign: positive green, negative red (account balances).",
+              "type": "boolean"
             }
           }
         },

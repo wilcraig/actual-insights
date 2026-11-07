@@ -55,13 +55,13 @@
       {#each rows as row (row.id)}
         <li class="abl-row">
           <span class="abl-name">{row.name}</span>
-          <span class="abl-amount">{formatCents(row.cents)}</span>
+          <span class="abl-amount" class:abl-pos={row.cents > 0} class:abl-neg={row.cents < 0}>{formatCents(row.cents)}</span>
         </li>
       {/each}
       {#if showTotal}
         <li class="abl-row abl-row--total">
           <span class="abl-name">Total</span>
-          <span class="abl-amount">{formatCents(total)}</span>
+          <span class="abl-amount" class:abl-pos={total > 0} class:abl-neg={total < 0}>{formatCents(total)}</span>
         </li>
       {/if}
     </ul>
@@ -103,6 +103,12 @@
     font-variant-numeric: tabular-nums;
     font-weight: 600;
     white-space: nowrap;
+  }
+  .abl-pos {
+    color: #15803d;
+  }
+  .abl-neg {
+    color: #b91c1c;
   }
   .abl-row--total {
     border-bottom: none;

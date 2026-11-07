@@ -895,7 +895,7 @@ describe('list: account balance list', () => {
 
   test('every open account by default, with budget side and balance in cents, no total', async () => {
     const card = await one('markdown-card', md('{"accountIds":[],"showTotal":false}'));
-    expect(card).toMatchObject({ kind: 'list', title: 'Account balances' });
+    expect(card).toMatchObject({ kind: 'list', title: 'Account balances', signed: true });
     expect(card.rows).toEqual([
       { title: 'Checking', subtitle: 'On budget', value: 123456 },
       { title: 'Savings', subtitle: 'On budget', value: 5000 },
