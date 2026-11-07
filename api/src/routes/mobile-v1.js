@@ -6,11 +6,11 @@ const { touchToken } = require('../mobile-tokens-store');
 const { bearerAuth, rateLimit, resetRateLimits, READ_LIMIT, WRITE_LIMIT } = require('../mobile/http');
 const { createReadCache } = require('../mobile/v1/cache');
 const { MONTH_PATTERN, ID_PATTERN, MAX_NOTE, MAX_MONEY, HttpError, badRequest, notFound, isValidId, monthWithinWindow } = require('../mobile/v1/common');
-const { MAX_LIMIT, DEFAULT_LIMIT, CURSOR_PATTERN, buildCurrency, buildAccounts, buildTransactions, buildCategories, buildBudgetMonth, buildTransactionDetail } = require('../mobile/v1/read');
+const { MAX_LIMIT, DEFAULT_LIMIT, CURSOR_PATTERN, buildCurrency, buildAccounts, buildTransactions, buildTransactionSuggest, SUGGEST_MAX_LIMIT, SUGGEST_DEFAULT_LIMIT, buildCategories, buildBudgetMonth, buildTransactionDetail } = require('../mobile/v1/read');
 const { RANGES, buildAccountDetail, putAccountSettings } = require('../mobile/v1/accounts');
 const { buildColors, putColor, isColorKey } = require('../mobile/v1/colors');
 const { buildSpending } = require('../mobile/v1/spending');
-const { updateTransactionFields, splitTransactionLines, removeSplit, setBudgetedAmount, moveBudget, createGroup, createCategory } = require('../mobile/v1/write');
+const { updateTransactionFields, splitTransactionLines, removeSplit, setBudgetedAmount, moveBudget, createGroup, createCategory, createAccountGroup, renameAccountGroup, deleteAccountGroup, setAccountGroup } = require('../mobile/v1/write');
 
 // /api/mobile/v1: the native client API (contract: native-v1.schema.json in
 // the Chipmunk repo, copied under api/test/fixtures). Mounted BEFORE the
@@ -118,14 +118,33 @@ router.get('/accounts/:id', readLimit, read((req) => {
   return { key: `account|${id}|${range}`, build: (client) => buildAccountDetail(client, id, range) };
 }));
 
+// A comma-separated id list: 1..20 valid ids, no empty elements, deduped.
+function idList(value) {
+  if (value === undefined) return undefined;
+  const parts = value.split(',');
+  if (parts.length > MAX_ID_LIST || !parts.every(isValidId)) throw badRequest();
+  return [...new Set(parts)];
+}
+
+const MAX_Q = 100;
+const MAX_ID_LIST = 20;
+
 router.get('/transactions', readLimit, read((req) => {
-  strictQuery(req, ['account', 'uncategorized', 'group', 'category', 'limit', 'cursor', 'showHidden']);
+  strictQuery(req, ['account', 'uncategorized', 'group', 'category', 'payees', 'categories', 'q', 'limit', 'cursor', 'showHidden']);
   const { account, uncategorized, group, category, limit, cursor, showHidden } = req.query;
   if (account !== undefined && !isValidId(account)) throw badRequest();
   if (group !== undefined && !isValidId(group)) throw badRequest();
   if (category !== undefined && !isValidId(category)) throw badRequest();
+  const payees = idList(req.query.payees);
+  const categories = idList(req.query.categories);
+  let q;
+  if (req.query.q !== undefined) {
+    q = req.query.q.trim();
+    if (q.length < 1 || q.length > MAX_Q) throw badRequest();
+  }
   // Where the money went: at most one way of saying it.
   if ([uncategorized, group, category].filter((v) => v !== undefined).length > 1) throw badRequest();
+  if (categories !== undefined && [uncategorized, group, category].some((v) => v !== undefined)) throw badRequest();
   if (uncategorized !== undefined && uncategorized !== '1') throw badRequest();
   // Only the value 1 asks for hidden transactions too.
   if (showHidden !== undefined && showHidden !== '1') throw badRequest();
@@ -137,11 +156,15 @@ router.get('/transactions', readLimit, read((req) => {
     uncategorized: uncategorized === '1',
     group,
     category,
+    payees: payees && [...payees].sort(),
+    categories: categories && [...categories].sort(),
+    q,
     limit: limit === undefined ? DEFAULT_LIMIT : Number(limit),
     cursor,
     showHidden: showHidden === '1',
   };
-  const key = `transactions|${params.showHidden ? 1 : 0}|${params.account ?? ''}|${params.uncategorized ? 1 : 0}|${params.group ?? ''}|${params.category ?? ''}|${params.limit}|${params.cursor ?? ''}`;
+  // q is free text, so it is JSON-encoded: it can never run into the next field.
+  const key = `transactions|${params.showHidden ? 1 : 0}|${params.account ?? ''}|${params.uncategorized ? 1 : 0}|${params.group ?? ''}|${params.category ?? ''}|${params.limit}|${params.cursor ?? ''}|${params.payees ? params.payees.join(',') : ''}|${params.categories ? params.categories.join(',') : ''}|${q === undefined ? '' : JSON.stringify(q)}`;
   return {
     key,
     build: (client) => {
@@ -150,6 +173,20 @@ router.get('/transactions', readLimit, read((req) => {
       return buildTransactions(client, params);
     },
   };
+}));
+
+// Registered before /transactions/:id so "suggest" is never read as an id.
+// An empty q is allowed here (it lists alphabetically), so no strictQuery.
+router.get('/transactions/suggest', readLimit, read((req) => {
+  for (const [key, value] of Object.entries(req.query)) {
+    if (!['q', 'limit'].includes(key) || typeof value !== 'string') throw badRequest();
+  }
+  const { limit } = req.query;
+  const text = (req.query.q ?? '').trim();
+  if (text.length > MAX_Q) throw badRequest();
+  if (limit !== undefined && (!/^[1-9][0-9]?$/.test(limit) || Number(limit) > SUGGEST_MAX_LIMIT)) throw badRequest();
+  const n = limit === undefined ? SUGGEST_DEFAULT_LIMIT : Number(limit);
+  return { key: `suggest|${n}|${JSON.stringify(text)}`, build: (client) => buildTransactionSuggest(client, text, n) };
 }));
 
 router.get('/categories', readLimit, read((req) => {
@@ -370,6 +407,31 @@ router.post('/category-groups', writeLimit, requireWrite, parseJson, write((req)
   const { name } = strictBody(req, ['name']);
   const clean = cleanName(name);
   return () => createGroup({ tokenId: req.deviceToken.id, name: clean });
+}));
+
+router.post('/account-groups', writeLimit, requireWrite, parseJson, write((req) => {
+  const { name } = strictBody(req, ['name']);
+  const clean = cleanName(name);
+  return () => createAccountGroup({ tokenId: req.deviceToken.id, name: clean });
+}));
+
+router.patch('/account-groups/:id', writeLimit, requireWrite, parseJson, write((req) => {
+  const id = pathId(req.params.id);
+  const { name } = strictBody(req, ['name']);
+  const clean = cleanName(name);
+  return () => renameAccountGroup({ tokenId: req.deviceToken.id, id, name: clean });
+}));
+
+router.delete('/account-groups/:id', writeLimit, requireWrite, write((req) => {
+  const id = pathId(req.params.id);
+  return () => deleteAccountGroup({ tokenId: req.deviceToken.id, id });
+}));
+
+router.put('/accounts/:id/group', writeLimit, requireWrite, parseJson, write((req) => {
+  const id = pathId(req.params.id);
+  const { groupId } = strictBody(req, ['groupId']);
+  if (groupId !== null && !isValidId(groupId)) throw badRequest();
+  return () => setAccountGroup({ tokenId: req.deviceToken.id, id, groupId });
 }));
 
 router.post('/categories', writeLimit, requireWrite, parseJson, write((req) => {

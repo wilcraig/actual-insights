@@ -2645,6 +2645,133 @@
           "$ref": "#/definitions/categoryItem"
         }
       }
+    },
+    "accountGroupCreateRequest": {
+      "description": "POST /account-groups (write scope). Creates one of Actual's account groups. name 1..200 characters after trimming; a duplicate name (any case) is 409 conflict. Answers accountGroupCreatedResponse. PATCH /account-groups/<id> takes the same body (renames; answers okResponse); DELETE /account-groups/<id> removes the group and leaves its accounts ungrouped (answers okResponse).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      }
+    },
+    "accountGroupCreatedResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "group"
+      ],
+      "properties": {
+        "schema": {
+          "const": 1
+        },
+        "group": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "name"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/id"
+            },
+            "name": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        }
+      }
+    },
+    "accountGroupAssignRequest": {
+      "description": "PUT /accounts/<id>/group (write scope). Puts the account in the group, or in none when groupId is null. An unknown account or group is 404. Answers okResponse.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "groupId"
+      ],
+      "properties": {
+        "groupId": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "transactionSuggestResponse": {
+      "description": "GET /transactions/suggest?q=<text>&limit=<1..25> (read scope). Typeahead for the Transactions search bar and the Merchant filter: merchants (payees that are not transfers) and categories whose name contains q (case-insensitive; names that START with q first, then alphabetical). q is 0..100 characters (empty lists alphabetically); limit defaults to 8 and applies to each list. Hidden categories are left out.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "merchants",
+        "categories"
+      ],
+      "properties": {
+        "schema": {
+          "const": 1
+        },
+        "merchants": {
+          "type": "array",
+          "maxItems": 25,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/definitions/id"
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 200
+              }
+            }
+          }
+        },
+        "categories": {
+          "type": "array",
+          "maxItems": 25,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "groupName"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/definitions/id"
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "groupName": {
+                "type": "string",
+                "maxLength": 200
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

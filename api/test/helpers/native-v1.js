@@ -97,6 +97,20 @@ function makeFakeActual(overrides = {}) {
       default: return row[p] ?? null;
     }
   };
+  // Mirrors loot-core's likePatternToRegex (the engine behind AQL $like):
+  // % and ? are wildcards, a backslash escapes only %, ? and \, case-insensitive.
+  const SPECIAL = /[.*+^${}()|[\]\\?]/g;
+  const likeRegex = (pattern) => {
+    let out = '';
+    for (let i = 0; i < pattern.length; i += 1) {
+      const ch = pattern[i];
+      const next = pattern[i + 1];
+      if (ch === '\\' && (next === '%' || next === '?' || next === '\\')) { out += next.replace(SPECIAL, '\\$&'); i += 1; } else if (ch === '%') out += '.*';
+      else if (ch === '?') out += '.';
+      else out += ch.replace(SPECIAL, '\\$&');
+    }
+    return new RegExp(out, 'i');
+  };
   const matches = (row, expr) => Object.entries(expr).every(([k, v]) => {
     if (k === '$and') return v.every((e) => matches(row, e));
     if (k === '$or') return v.some((e) => matches(row, e));
@@ -105,6 +119,7 @@ function makeFakeActual(overrides = {}) {
       if ('$lt' in v) return actual < v.$lt;
       if ('$ne' in v) return actual !== v.$ne;
       if ('$oneof' in v) return v.$oneof.includes(actual);
+      if ('$like' in v) return typeof actual === 'string' && likeRegex(v.$like).test(actual);
       throw new Error('fake AQL: unsupported operator');
     }
     return actual === v;
@@ -119,6 +134,7 @@ function makeFakeActual(overrides = {}) {
     state,
     sync: jest.fn(async () => { state.syncs += 1; }),
     getAccounts: jest.fn(async () => state.accounts.map(({ balance, ...a }) => a)),
+    getPayees: jest.fn(async () => Object.entries(state.payees).map(([id, p]) => ({ id, ...p }))),
     getAccountGroups: jest.fn(async () => state.accountGroups),
     getAccountBalance: jest.fn(async (id) => acct(id).balance),
     getCategoryGroups: jest.fn(async () => state.groups),

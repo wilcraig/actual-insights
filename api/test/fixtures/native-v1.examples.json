@@ -893,5 +893,34 @@
       "name": "Vet",
       "color": "blue"
     }
+  },
+  "accountGroupCreateRequest": {
+    "name": "Cards"
+  },
+  "accountGroupCreatedResponse": {
+    "schema": 1,
+    "group": {
+      "id": "ag-cards",
+      "name": "Cards"
+    }
+  },
+  "accountGroupAssignRequest": {
+    "groupId": "ag-cards"
+  },
+  "transactionSuggestResponse": {
+    "schema": 1,
+    "merchants": [
+      {
+        "id": "payee-grocer",
+        "name": "Corner Grocer"
+      }
+    ],
+    "categories": [
+      {
+        "id": "cat-groceries",
+        "name": "Groceries",
+        "groupName": "Everyday"
+      }
+    ]
   }
 }

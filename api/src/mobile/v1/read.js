@@ -172,7 +172,15 @@ const UNCATEGORIZED_FILTER = [
   { 'account.closed': false },
 ];
 
-function transactionFilters({ account, uncategorized, group, category }) {
+// AQL $like (loot-core's likePatternToRegex): `%` and `?` are wildcards, a
+// backslash escapes only `%`, `?` and `\\`, and the match is case-insensitive
+// and diacritic-insensitive. `_` is NOT special there, so it stays as typed.
+// Escape exactly the three that are, so the user's text matches literally.
+function escapeLike(text) {
+  return String(text).replace(/[\\%?]/g, (ch) => `\\${ch}`);
+}
+
+function transactionFilters({ account, uncategorized, group, category, payees, categories, q }) {
   const filters = [];
   // Without an account, only open accounts' rows: a closed account can't be
   // edited and is not in /accounts either.
@@ -182,6 +190,13 @@ function transactionFilters({ account, uncategorized, group, category }) {
   // Where the money went: a group matches every category in it.
   if (group) filters.push({ 'category.group': group });
   if (category) filters.push({ category });
+  // Across kinds these AND (each is its own filter); within a list they OR ($oneof).
+  if (payees && payees.length) filters.push({ payee: { $oneof: payees } });
+  if (categories && categories.length) filters.push({ category: { $oneof: categories } });
+  if (q) {
+    const like = { $like: `%${escapeLike(q)}%` };
+    filters.push({ $or: [{ 'payee.name': like }, { 'category.name': like }, { notes: like }] });
+  }
   return filters;
 }
 
@@ -196,7 +211,7 @@ async function assertAccountExists(client, accountId) {
 
 // params: { account?, uncategorized: boolean, group?, category?, limit, cursor? } (already validated).
 async function buildTransactions(client, params, now = new Date()) {
-  const { account, uncategorized = false, group, category, limit = DEFAULT_LIMIT, cursor, showHidden = false } = params;
+  const { account, uncategorized = false, group, category, payees, categories, q: text, limit = DEFAULT_LIMIT, cursor, showHidden = false } = params;
   if (account) await assertAccountExists(client, account);
 
   // Flags are read once. The uncategorized view never lists an excluded
@@ -205,7 +220,7 @@ async function buildTransactions(client, params, now = new Date()) {
   const flags = await readFlags();
   const flagged = (pick) => Object.keys(flags).filter((id) => pick(flags[id]));
   const leftOut = notInClause(uncategorized ? flagged((f) => f.excluded) : showHidden ? [] : flagged((f) => f.hidden));
-  const filters = transactionFilters({ account, uncategorized, group, category });
+  const filters = transactionFilters({ account, uncategorized, group, category, payees, categories, q: text });
   if (leftOut) filters.push(leftOut);
   const pageFilters = [...filters];
   if (cursor) {
@@ -244,6 +259,42 @@ async function buildTransactions(client, params, now = new Date()) {
     body.uncategorizedCount = Math.max(0, Math.min(1000000, Number.isInteger(value) ? value : 0));
   }
   return body;
+}
+
+const SUGGEST_MAX_LIMIT = 25;
+const SUGGEST_DEFAULT_LIMIT = 8;
+
+// Names containing the text (case-insensitive), those starting with it first,
+// then alphabetical (case-insensitive), at most `limit`.
+function rankByName(items, text, limit) {
+  const needle = text.toLowerCase();
+  const rank = items
+    .map((item) => ({ item, lower: item.name.toLowerCase() }))
+    .filter(({ lower }) => lower.includes(needle))
+    .sort((a, b) => {
+      const sa = a.lower.startsWith(needle) ? 0 : 1;
+      const sb = b.lower.startsWith(needle) ? 0 : 1;
+      if (sa !== sb) return sa - sb;
+      return a.lower < b.lower ? -1 : a.lower > b.lower ? 1 : a.item.name < b.item.name ? -1 : a.item.name > b.item.name ? 1 : 0;
+    });
+  return rank.slice(0, limit).map(({ item }) => item);
+}
+
+// Typeahead for the search bar and the Merchant picker: payees (not transfer
+// payees) and visible categories whose name contains the text.
+async function buildTransactionSuggest(client, text, limit = SUGGEST_DEFAULT_LIMIT) {
+  const payees = ((await client.getPayees()) || [])
+    .filter((p) => p && isValidId(p.id) && p.transfer_acct == null && typeof p.name === 'string' && p.name.trim() !== '')
+    .map((p) => ({ id: p.id, name: clip(p.name) }));
+  const categories = [];
+  for (const group of (await client.getCategoryGroups()) || []) {
+    if (group.hidden || !isValidId(group.id)) continue;
+    for (const c of group.categories || []) {
+      if (c.hidden || !isValidId(c.id) || typeof c.name !== 'string' || c.name.trim() === '') continue;
+      categories.push({ id: c.id, name: clip(c.name), groupName: clip(group.name) });
+    }
+  }
+  return { schema: 1, merchants: rankByName(payees, text, limit), categories: rankByName(categories, text, limit) };
 }
 
 const DETAIL_FIELDS = [...TX_FIELDS, 'imported_payee', 'imported_id', 'reconciled', 'schedule', 'schedule.name'];
@@ -378,6 +429,9 @@ module.exports = {
   buildAccounts,
   buildTransactions,
   buildCategories,
+  buildTransactionSuggest,
+  SUGGEST_MAX_LIMIT,
+  SUGGEST_DEFAULT_LIMIT,
   buildBudgetMonth,
   readTransactionRow,
   buildTransactionDetail,

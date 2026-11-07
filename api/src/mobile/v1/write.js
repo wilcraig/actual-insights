@@ -402,4 +402,63 @@ async function createCategory({ tokenId, groupId, name, budgeted }) {
   });
 }
 
-module.exports = { createGroup, createCategory, updateTransactionFields, splitTransactionLines, removeSplit, setBudgetedAmount, moveBudget, exclusive, syncNow, findCategory };
+// Account groups (Actual's sidebar groups). Names are unique ignoring case; a
+// deleted group leaves its accounts ungrouped (Actual does that itself).
+async function accountGroupsOf(client) {
+  if (typeof client.getAccountGroups !== 'function') throw notFound();
+  return (await client.getAccountGroups()) || [];
+}
+
+async function createAccountGroup({ tokenId, name }) {
+  return exclusive(async () => {
+    const client = await getActualClient();
+    const groups = await accountGroupsOf(client);
+    if (groups.some((g) => sameName(g.name, name))) throw conflict();
+    const id = await client.createAccountGroup({ name });
+    await appendAudit({ tokenId, op: 'account-group.create', ids: { group: id }, after: { name: clipLog(name) } });
+    await syncNow(client);
+    return { schema: 1, group: { id, name: clip(name) } };
+  });
+}
+
+async function renameAccountGroup({ tokenId, id, name }) {
+  return exclusive(async () => {
+    const client = await getActualClient();
+    const groups = await accountGroupsOf(client);
+    const group = groups.find((g) => g.id === id);
+    if (!group) throw notFound();
+    if (groups.some((g) => g.id !== id && sameName(g.name, name))) throw conflict();
+    await client.updateAccountGroup(id, { name });
+    await appendAudit({ tokenId, op: 'account-group.rename', ids: { group: id }, before: { name: clipLog(group.name) }, after: { name: clipLog(name) } });
+    await syncNow(client);
+    return { schema: 1, ok: true };
+  });
+}
+
+async function deleteAccountGroup({ tokenId, id }) {
+  return exclusive(async () => {
+    const client = await getActualClient();
+    const group = (await accountGroupsOf(client)).find((g) => g.id === id);
+    if (!group) throw notFound();
+    await client.deleteAccountGroup(id);
+    await appendAudit({ tokenId, op: 'account-group.delete', ids: { group: id }, before: { name: clipLog(group.name) } });
+    await syncNow(client);
+    return { schema: 1, ok: true };
+  });
+}
+
+// Puts one account into a group, or (groupId null) into none.
+async function setAccountGroup({ tokenId, id, groupId }) {
+  return exclusive(async () => {
+    const client = await getActualClient();
+    const account = ((await client.getAccounts()) || []).find((a) => a.id === id);
+    if (!account) throw notFound();
+    if (groupId !== null && !(await accountGroupsOf(client)).some((g) => g.id === groupId)) throw notFound();
+    await client.updateAccount(id, { account_group_id: groupId });
+    await appendAudit({ tokenId, op: 'account.group', ids: { account: id }, before: { group: account.account_group_id || null }, after: { group: groupId } });
+    await syncNow(client);
+    return { schema: 1, ok: true };
+  });
+}
+
+module.exports = { createGroup, createCategory, updateTransactionFields, splitTransactionLines, removeSplit, setBudgetedAmount, moveBudget, exclusive, syncNow, findCategory, createAccountGroup, renameAccountGroup, deleteAccountGroup, setAccountGroup };
