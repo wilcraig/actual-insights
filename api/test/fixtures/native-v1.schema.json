@@ -2797,6 +2797,102 @@
           }
         }
       }
+    },
+    "entitlementRequest": {
+      "description": "POST /entitlement (read scope is enough: it proves a purchase, it changes no budget data). The app sends the store's proof that this person has an active Chipmunk subscription. platform 'apple': proof is the StoreKit 2 signed transaction (JWS compact string) for product chipmunk.monthly or chipmunk.yearly. platform 'google': proof is the Play purchase JSON string exactly as the Billing Library returned it and signature is its base64 signature. Answers entitlementResponse. Servers older than this endpoint answer 404; apps ignore that silently.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "platform",
+            "proof"
+          ],
+          "properties": {
+            "platform": {
+              "const": "apple"
+            },
+            "proof": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "platform",
+            "proof",
+            "signature"
+          ],
+          "properties": {
+            "platform": {
+              "const": "google"
+            },
+            "proof": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384
+            },
+            "signature": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            }
+          }
+        }
+      ]
+    },
+    "entitlementResponse": {
+      "description": "Response to POST /entitlement and GET /entitlement. entitled is whether Chipmunk mode on the web may be on right now. reason: 'verified' (proof checked and current), 'expired' (genuine proof but the subscription or the 30+7 day check-in window has run out), 'unverified' (the signature or certificate chain did not check out), 'not_configured' (this server cannot check that platform yet), 'none' (GET only: no proof has ever been sent). lastVerifiedAt is when the server last accepted a proof; validUntil is when entitlement lapses unless a new proof arrives.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "entitled",
+        "reason",
+        "lastVerifiedAt",
+        "validUntil"
+      ],
+      "properties": {
+        "schema": {
+          "const": 1
+        },
+        "entitled": {
+          "type": "boolean"
+        },
+        "reason": {
+          "enum": [
+            "verified",
+            "expired",
+            "unverified",
+            "not_configured",
+            "none"
+          ]
+        },
+        "lastVerifiedAt": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/generatedAt"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "validUntil": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/generatedAt"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
     }
   }
 }

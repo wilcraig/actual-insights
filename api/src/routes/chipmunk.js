@@ -1,7 +1,7 @@
 const express = require('express');
 
 const { getActualClient, syncIfDue } = require('../actual-client');
-const { chipmunkEntitled } = require('../chipmunk/entitlement');
+const { chipmunkEntitled, entitlementMode } = require('../chipmunk/entitlement');
 const { readSettings, writeSettings } = require('../chipmunk/settings-store');
 const { MONTH_PATTERN, isValidId, monthWithinWindow } = require('../mobile/v1/common');
 const { MAX_LIMIT, DEFAULT_LIMIT, CURSOR_PATTERN, buildAccounts, buildTransactions, buildTransactionSuggest, SUGGEST_MAX_LIMIT, SUGGEST_DEFAULT_LIMIT, buildBudgetMonth } = require('../mobile/v1/read');
@@ -27,6 +27,8 @@ async function state() {
     entitled: ent.entitled === true,
     reason: ent.reason,
     lastVerifiedAt: ent.lastVerifiedAt ?? null,
+    validUntil: ent.validUntil ?? null,
+    mode: entitlementMode(),
   };
 }
 

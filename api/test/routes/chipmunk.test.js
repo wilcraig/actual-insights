@@ -7,7 +7,7 @@ process.env.INSIGHTS_DATA_DIR = DATA_DIR;
 
 jest.mock('../../src/actual-client');
 jest.mock('../../src/auth');
-jest.mock('../../src/chipmunk/entitlement', () => ({ chipmunkEntitled: jest.fn() }));
+jest.mock('../../src/chipmunk/entitlement', () => ({ chipmunkEntitled: jest.fn(), entitlementMode: jest.fn(() => 'strict') }));
 jest.mock('../../src/mobile/v1/reports', () => ({ buildReports: jest.fn(), buildReportList: jest.fn() }));
 
 const { getActualClient, syncIfDue } = require('../../src/actual-client');
@@ -41,7 +41,7 @@ beforeEach(() => {
   validateToken.mockReset();
   validateToken.mockImplementation(async (t) => t === 'valid');
   chipmunkEntitled.mockReset();
-  chipmunkEntitled.mockResolvedValue({ entitled: true, reason: 'unlicensed-dev', lastVerifiedAt: null });
+  chipmunkEntitled.mockResolvedValue({ entitled: true, reason: 'verified', lastVerifiedAt: '2026-11-09T21:00:00.000Z', validUntil: '2026-12-16T21:00:00.000Z' });
   client = makeFakeActual();
   getActualClient.mockReset();
   getActualClient.mockImplementation(async () => client);
@@ -56,9 +56,10 @@ beforeEach(() => {
 afterEach(() => console.error.mockRestore());
 
 describe('entitlement (real module)', () => {
-  it('is entitled as unlicensed-dev for now', async () => {
+  it('is no longer the always-true stub: strict and not entitled until a proof arrived', async () => {
     const real = jest.requireActual('../../src/chipmunk/entitlement');
-    expect(await real.chipmunkEntitled()).toEqual({ entitled: true, reason: 'unlicensed-dev', lastVerifiedAt: null });
+    expect(await real.chipmunkEntitled()).toEqual({ entitled: false, reason: 'none', lastVerifiedAt: null, validUntil: null });
+    expect(real.entitlementMode()).toBe('strict');
   });
 });
 
@@ -83,7 +84,11 @@ describe('/api/chipmunk-mode', () => {
 
   it('is off by default, can be switched on and off, and reports entitlement', async () => {
     await withServer(async (base) => {
-      expect(await (await get(base, '/api/chipmunk-mode')).json()).toEqual({ enabled: false, entitled: true, reason: 'unlicensed-dev', lastVerifiedAt: null });
+      expect(await (await get(base, '/api/chipmunk-mode')).json()).toEqual({ enabled: false, entitled: true, reason: 'verified', lastVerifiedAt: '2026-11-09T21:00:00.000Z', validUntil: '2026-12-16T21:00:00.000Z', mode: 'strict' });
+      const { entitlementMode } = require('../../src/chipmunk/entitlement');
+      entitlementMode.mockReturnValue('dev');
+      expect((await (await get(base, '/api/chipmunk-mode')).json()).mode).toBe('dev');
+      entitlementMode.mockReturnValue('strict');
       const on = await send(base, 'PUT', '/api/chipmunk-mode', { enabled: true });
       expect(on.status).toBe(200);
       expect((await on.json()).enabled).toBe(true);

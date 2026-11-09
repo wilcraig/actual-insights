@@ -22,11 +22,10 @@ Budget page is untouched (the Budget tab is an addition, not a replacement).
 
 ## How it works
 
-- `GET /api/chipmunk-mode` -> `{ enabled, entitled, reason, lastVerifiedAt: null }`. `PUT` with `{ enabled }` (session
+- `GET /api/chipmunk-mode` -> `{ enabled, entitled, reason, lastVerifiedAt, validUntil, mode }` (`mode` is `strict`, `dev` or `open`). `PUT` with `{ enabled }` (session
   auth, like the other settings). Stored in `chipmunk-mode.json` in the Insights data dir; missing file = off.
-- All "is it available?" decisions go through `chipmunkEntitled()` in `api/src/chipmunk/entitlement.js`. Today it
-  returns `{ entitled: true, reason: 'unlicensed-dev' }`; a later phase replaces the body with real subscription
-  verification and nothing else changes. `enabled` reported to the bundle is `stored && entitled`. Turning the mode
+- All "is it available?" decisions go through `chipmunkEntitled()` in `api/src/chipmunk/entitlement.js`, which returns
+  `{ entitled, reason, lastVerifiedAt, validUntil }` from the stored subscription proof (see below). `enabled` reported to the bundle is `stored && entitled`. Turning the mode
   on while not entitled is a 403, and the data routes below refuse too.
 - Thin web routes `/api/chipmunk/{report-list,reports,accounts,transactions,transactions/suggest}` sit behind the
   normal Actual-session guard and call the **same builders** the phone API uses (`api/src/mobile/v1/*`). No logic is
@@ -52,3 +51,51 @@ cleared by a web write, so a phone can show the old amounts for up to 15 s.
 
 Cards the phone renders from sankey/timeline/multiseries data show as a short placeholder on the web (the web's own
 widgets already draw those, on the Reports page). Apart from budget series, these tabs are read-only (no transaction or budget-amount editing).
+
+## Subscription proof (who may turn it on)
+
+Chipmunk mode is for people with an active Chipmunk subscription. The apps hold the store subscription and prove it to
+*this* server; there is no Chipmunk backend. Contract: `POST`/`GET /api/mobile/v1/entitlement` in the Chipmunk repo's
+`native-v1.schema.json` (`entitlementRequest`, `entitlementResponse`). Any valid device token may call it (read scope is
+enough); POST counts against the write rate limit (20/min), GET against the read limit. Proofs are never logged or stored.
+
+- **Apple**: the StoreKit 2 signed transaction. Verified offline with `@apple/app-store-server-library` against Apple's
+  roots vendored in `api/src/chipmunk/apple-roots/` (Apple Root CA - G3, G2 and the older Apple Root CA, DER; SHA-256 pinned
+  in code and checked on load; online OCSP checks are off, so verification needs no network). Bundle id
+  `app.chipmunkbudget.chipmunk`, product `chipmunk.monthly` or `chipmunk.yearly`, environment Production or Sandbox.
+  Expiry comes from the transaction.
+- **Google**: the Play purchase JSON plus its signature, checked (RSA-SHA1, or SHA256) against `CHIPMUNK_PLAY_PUBLIC_KEY`
+  (the base64 licensing public key from the Play Console). Package, product and `purchaseState 0` are required. Until the
+  key is set, Google proofs answer `reason: not_configured`. Play JSON has no expiry, so only the check-in window applies.
+- **Validity**: entitled iff the last accepted proof is at most 30 days + 7 days grace old and, for Apple, the transaction's
+  own expiry + 7 days has not passed. A newer proof extends it; an older renewal period never rewinds a later one.
+  Apps re-send daily. State is `chipmunk-entitlement.json` in the data dir: platform, product id, sha256 of the original
+  transaction id, expiry, verification time.
+- **Answers**: `verified`, `expired` (genuine proof, but the subscription or window ran out), `unverified` (bad signature,
+  chain, bundle or product), `not_configured`, `none` (GET only, nothing ever sent). Bad bodies are 400.
+- **Web**: the General tab toggle shows who verified it and until when, or how to unlock it, and a "Test mode" note when the
+  server is not strict.
+
+### Server mode: `CHIPMUNK_ENTITLEMENT_MODE`
+
+| Value | Meaning |
+|---|---|
+| unset | **strict** (production). Everything above is enforced. |
+| `dev` | Structurally valid Apple JWS is accepted without checking the certificate chain (Xcode StoreKit-testing transactions only verify here); Play signatures are not checked, and Google works without a key. Bundle id, product and expiry are still checked. Logs a loud warning at start. |
+| `open` | Always entitled, no proof needed (demos). Reported as `reason: verified` with `lastVerifiedAt: null` until a proof has arrived, `validUntil: null`. |
+
+Anyone with a device token can unlock Chipmunk mode on a `dev` or `open` server; never use them on a real server.
+
+### Local testing with a dev proof
+
+```sh
+# demo server (Chipmunk repo tools/demo-server) in dev mode:
+CHIPMUNK_ENTITLEMENT_MODE=dev ~/Code/chipmunk/tools/demo-server/demo-server.sh up   # the script passes the variable to the container
+# mint a proof and post it (token from the environment, never echoed):
+export CHIPMUNK_DEVICE_TOKEN=<token from Insights > Mobile app>
+node api/tools/mint-dev-proof.js --post http://127.0.0.1:5181 --product yearly --days 30
+node api/tools/mint-dev-proof.js            # just print the proof
+```
+
+A strict server answers `unverified` to these proofs by design. Nothing here has been tested against a real App Store or Play
+purchase; the unit tests use a generated certificate chain trusted in place of Apple's roots.

@@ -56,7 +56,9 @@ describe('ChipmunkModeRow', () => {
     api.getMode.mockResolvedValue({ enabled: false, entitled: false, reason: 'expired' });
     let h = await mount(ChipmunkModeRow);
     expect(h.querySelector('input').disabled).toBe(true);
-    expect(h.textContent).toContain('expired');
+    expect(h.textContent).toContain('Open Chipmunk (iPhone, Mac or Android) once with a current subscription to unlock this');
+    expect(h.textContent).toContain('has run out');
+    expect(h.textContent).not.toContain('Test mode');
     api.getMode.mockResolvedValue({ enabled: false, entitled: true });
     api.setMode.mockRejectedValue(new Error('boom'));
     h = await mount(ChipmunkModeRow);
@@ -64,6 +66,35 @@ describe('ChipmunkModeRow', () => {
     h.querySelector('input').dispatchEvent(new Event('change', { bubbles: true }));
     await flush();
     expect(h.textContent).toContain('boom');
+  });
+});
+
+describe('ChipmunkModeRow subscription state', () => {
+  test('entitled: says who verified it, when, and until when', async () => {
+    api.getMode.mockResolvedValue({ enabled: false, entitled: true, reason: 'verified', lastVerifiedAt: '2026-11-09T21:00:00.000Z', validUntil: '2026-12-16T21:00:00.000Z', mode: 'strict' });
+    const h = await mount(ChipmunkModeRow);
+    expect(h.querySelector('input').disabled).toBe(false);
+    expect(h.textContent).toMatch(/Verified by your Chipmunk app on .*2026.*; the app re-checks daily \(valid until .*2026.*\)/);
+    expect(h.textContent).not.toContain('Test mode');
+  });
+  test.each([['none', 'No Chipmunk subscription has been confirmed yet'], ['unverified', 'could not be verified'], ['not_configured', 'cannot check that store']])(
+    'not entitled (%s): friendly reason, toggle disabled', async (reason, text) => {
+      api.getMode.mockResolvedValue({ enabled: false, entitled: false, reason, lastVerifiedAt: null, validUntil: null, mode: 'strict' });
+      const h = await mount(ChipmunkModeRow);
+      expect(h.querySelector('input').disabled).toBe(true);
+      expect(h.textContent).toContain(text);
+    });
+  test.each(['dev', 'open'])('%s mode shows a Test mode note', async (mode) => {
+    api.getMode.mockResolvedValue({ enabled: false, entitled: true, reason: 'verified', lastVerifiedAt: null, validUntil: null, mode });
+    const h = await mount(ChipmunkModeRow);
+    expect(h.textContent).toContain('Test mode');
+    expect(h.textContent).not.toContain('Verified by your Chipmunk app');
+  });
+  test('an older server without the new fields still renders', async () => {
+    api.getMode.mockResolvedValue({ enabled: false, entitled: true, reason: 'unlicensed-dev' });
+    const h = await mount(ChipmunkModeRow);
+    expect(h.querySelector('input').disabled).toBe(false);
+    expect(h.textContent).not.toContain('Test mode');
   });
 });
 

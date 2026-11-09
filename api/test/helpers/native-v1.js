@@ -9,8 +9,8 @@ const ajv = new Ajv({ allErrors: true, strict: false, validateFormats: false });
 ajv.addSchema(schema);
 
 // An example key may carry a suffix naming a variant of one definition
-// (reportsResponseCharts is a reportsResponse holding every chart kind).
-const definitionFor = (name) => (schema.definitions[name] ? name : name.replace(/Charts$/, ''));
+// (reportsResponseCharts is a reportsResponse holding every chart kind; entitlementRequestGoogle and entitlementResponseNone are variants of theirs).
+const definitionFor = (name) => (schema.definitions[name] ? name : name.replace(/(Charts|Google|None)$/, ''));
 
 function expectValid(definition, body) {
   definition = definitionFor(definition);

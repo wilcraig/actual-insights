@@ -461,6 +461,7 @@ router.post('/budget/:month/move', writeLimit, requireWrite, parseJson, write((r
 }));
 
 require('./mobile-v1-budget-series')(router, { readLimit, writeLimit, requireWrite, parseJson, read, cache, fail, strictQuery, touchToken });
+require('./mobile-v1-entitlement')(router, { readLimit, writeLimit, fail, touchToken });
 
 // Anything else under /api/mobile/v1 (after auth): not found, never a
 // fall-through to the Actual-session guard.

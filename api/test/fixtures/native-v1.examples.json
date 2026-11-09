@@ -931,5 +931,28 @@
         "groupName": "Everyday"
       }
     ]
+  },
+  "entitlementRequest": {
+    "platform": "apple",
+    "proof": "eyJhbGciOiJFUzI1NiIsIng1YyI6WyJNSUlCLi4uIl19.eyJwcm9kdWN0SWQiOiJjaGlwbXVuay5tb250aGx5In0.c2lnbmF0dXJl"
+  },
+  "entitlementRequestGoogle": {
+    "platform": "google",
+    "proof": "{\"productId\":\"chipmunk.monthly\",\"packageName\":\"app.chipmunkbudget.chipmunk\",\"purchaseState\":0,\"purchaseTime\":1767225600000,\"autoRenewing\":true}",
+    "signature": "c2lnbmF0dXJlLWJ5LXBsYXk="
+  },
+  "entitlementResponse": {
+    "schema": 1,
+    "entitled": true,
+    "reason": "verified",
+    "lastVerifiedAt": "2026-11-09T21:00:00.000Z",
+    "validUntil": "2026-12-09T21:00:00.000Z"
+  },
+  "entitlementResponseNone": {
+    "schema": 1,
+    "entitled": false,
+    "reason": "none",
+    "lastVerifiedAt": null,
+    "validUntil": null
   }
 }
