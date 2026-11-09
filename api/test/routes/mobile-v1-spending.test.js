@@ -109,6 +109,21 @@ test('requires a bearer token, like the other reads', async () => {
   });
 });
 
+describe('a month with no spending', () => {
+  test('every level answers 200 with nothing in it (the arrows rely on this)', async () => {
+    const { token } = await store.createToken('phone', DATA_DIR, { scope: 'read' });
+    await withServer(async (base) => {
+      for (const url of ['/spending?month=2026-01&level=categories&categoryIds=c-groc,c-fuel', '/spending?month=2026-01&level=payees&categoryId=c-groc', '/spending?month=2026-01&level=transactions&categoryId=c-groc&payeeId=__none__']) {
+        const res = await get(base, token, url);
+        expect([url, res.status]).toEqual([url, 200]);
+        const body = await res.json();
+        expectValid('spendingResponse', body);
+        expect([body.total, body.items.length, body.transactions.length]).toEqual([0, 0, 0]);
+      }
+    });
+  });
+});
+
 describe('levels', () => {
   test('categories: one item per category with spending, titled by the shared group, each drilling to payees', async () => {
     const { token } = await store.createToken('phone', DATA_DIR, { scope: 'read' });

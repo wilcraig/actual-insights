@@ -14,8 +14,16 @@
  * @returns {string}
  */
 export function buildPlaceholder(widgetId, fields, values, toBody) {
-  const body = toBody ? toBody(values) : fields.length === 1 ? values[fields[0].key] : values;
-  return `{{INSIGHTS:${widgetId}:${JSON.stringify(body)}}}`;
+  return `{{INSIGHTS:${widgetId}:${JSON.stringify(bodyOf(fields, values, toBody))}}}`;
+}
+
+/**
+ * The JSON body of a widget's placeholder (what its mount callback receives
+ * once parsed). The live preview mounts the widget with exactly this value, so
+ * it and the generated placeholder can never disagree.
+ */
+export function bodyOf(fields, values, toBody) {
+  return toBody ? toBody(values) : fields.length === 1 ? values[fields[0].key] : values;
 }
 
 /**
