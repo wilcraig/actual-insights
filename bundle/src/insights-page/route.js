@@ -16,6 +16,11 @@
 export const INSIGHTS_PAGE_HASH = '#actual-insights';
 export const TAB_IDS = ['general', 'summaries', 'channels', 'forecast', 'mobile'];
 const DEFAULT_TAB = 'general';
+// Chipmunk mode puts these in front (see docs/chipmunk-mode.md) and makes
+// Reports the bare page. Every function below behaves exactly as before
+// unless its optional `chipmunk` argument is true.
+export const CHIPMUNK_TAB_IDS = ['reports', 'accounts', 'transactions', 'budget'];
+export const CHIPMUNK_DEFAULT_TAB = 'reports';
 
 /**
  * True for `#actual-insights` and `#actual-insights/<anything>`.
@@ -31,10 +36,12 @@ export function isInsightsPageHash(hash) {
  * means the General tab.
  * @param {string} hash
  */
-export function tabFromHash(hash) {
-  if (!isInsightsPageHash(hash)) return DEFAULT_TAB;
+export function tabFromHash(hash, chipmunk = false) {
+  const fallback = chipmunk ? CHIPMUNK_DEFAULT_TAB : DEFAULT_TAB;
+  if (!isInsightsPageHash(hash)) return fallback;
   const tab = hash.slice(INSIGHTS_PAGE_HASH.length + 1);
-  return TAB_IDS.includes(tab) ? tab : DEFAULT_TAB;
+  if (chipmunk && CHIPMUNK_TAB_IDS.includes(tab)) return tab;
+  return TAB_IDS.includes(tab) ? tab : fallback;
 }
 
 /**
@@ -42,9 +49,12 @@ export function tabFromHash(hash) {
  * `#actual-insights` a user might type or bookmark is the canonical form.
  * @param {string} [tabId]
  */
-export function insightsHash(tabId = DEFAULT_TAB) {
-  if (!TAB_IDS.includes(tabId) || tabId === DEFAULT_TAB) return INSIGHTS_PAGE_HASH;
-  return `${INSIGHTS_PAGE_HASH}/${tabId}`;
+export function insightsHash(tabId, chipmunk = false) {
+  const fallback = chipmunk ? CHIPMUNK_DEFAULT_TAB : DEFAULT_TAB;
+  const id = tabId === undefined ? fallback : tabId;
+  const known = TAB_IDS.includes(id) || (chipmunk && CHIPMUNK_TAB_IDS.includes(id));
+  if (!known || id === fallback) return INSIGHTS_PAGE_HASH;
+  return `${INSIGHTS_PAGE_HASH}/${id}`;
 }
 
 /**
@@ -56,8 +66,8 @@ export function insightsHash(tabId = DEFAULT_TAB) {
  * @param {Window} win
  * @param {string} [tabId]
  */
-export function navigateToInsights(win, tabId = DEFAULT_TAB) {
-  const hash = insightsHash(tabId);
+export function navigateToInsights(win, tabId, chipmunk = false) {
+  const hash = insightsHash(tabId, chipmunk);
   const { pathname, search } = win.location;
   if (win.location.hash === hash) return;
   win.history.pushState(win.history.state, '', `${pathname}${search}${hash}`);

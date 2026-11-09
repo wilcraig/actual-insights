@@ -23,6 +23,7 @@ const mobileHiddenAccountsRouter = require('./routes/mobile-hidden-accounts');
 const mobileSummaryRouter = require('./routes/mobile-summary');
 const mobileV1Router = require('./routes/mobile-v1');
 const forecastRouter = require('./routes/forecast');
+const { modeRouter: chipmunkModeRouter, dataRouter: chipmunkDataRouter } = require('./routes/chipmunk');
 const { startScheduler } = require('./summary/scheduler');
 const { startForecastScheduler } = require('./forecast/scheduler');
 const { startBudgetSeriesScheduler } = require('./budget-series/scheduler');
@@ -76,6 +77,8 @@ app.use('/api/summaries', summariesRouter);
 app.use('/api/mobile/tokens', mobileTokensRouter);
 app.use('/api/mobile/hidden-accounts', mobileHiddenAccountsRouter);
 app.use('/api/forecast', forecastRouter);
+app.use('/api/chipmunk-mode', chipmunkModeRouter);
+app.use('/api/chipmunk', chipmunkDataRouter);
 
 app.get('/health', (req, res) => {
   if (hasEverConnected()) {

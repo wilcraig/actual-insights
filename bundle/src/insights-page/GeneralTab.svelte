@@ -3,6 +3,7 @@
   import { PRESETS, loadSavedScale, saveScale, applyScale } from '../text-scale';
   import { applyFreshTheme, loadSavedFreshThemeEnabled, saveFreshThemeEnabled } from '../fresh-theme';
   import GoalsList from './GoalsList.svelte';
+  import ChipmunkModeRow from '../chipmunk/ChipmunkModeRow.svelte';
 
   // The Insights page's General tab: what used to be the "Actual Insights"
   // card on Actual's Settings page, moved here unchanged (same controls,
@@ -91,6 +92,8 @@
         <span class="switch__track"><span class="switch__thumb"></span></span>
       </label>
     </div>
+
+    <ChipmunkModeRow />
 
     <GoalsList />
   </div>

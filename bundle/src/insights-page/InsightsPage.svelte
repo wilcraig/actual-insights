@@ -1,6 +1,8 @@
 <script>
-  import { TABS } from './tabs';
+  import { onMount } from 'svelte';
+  import { tabsFor } from './tabs';
   import { navigateToInsights } from './route';
+  import { getChipmunkMode, subscribeChipmunkMode } from '../chipmunk/mode-state';
 
   // `tabId` comes from the URL hash (mount-page.js passes it in and
   // updates it on every route change), so the tab bar only ever asks for
@@ -8,10 +10,16 @@
   // URL, and a click all land in the same place.
   let { tabId = 'general' } = $props();
 
-  let current = $derived(TABS.find((tab) => tab.id === tabId) ?? TABS[0]);
+  // Chipmunk mode (off unless the server says otherwise) puts the phone's
+  // screens in front; off, the tab list and routing are exactly as before.
+  let chipmunk = $state(getChipmunkMode().enabled);
+  onMount(() => subscribeChipmunkMode((s) => { chipmunk = s.enabled; }));
+
+  let tabs = $derived(tabsFor(chipmunk));
+  let current = $derived(tabs.find((tab) => tab.id === tabId) ?? tabs[0]);
 
   function selectTab(id) {
-    navigateToInsights(window, id);
+    navigateToInsights(window, id, chipmunk);
   }
 </script>
 
@@ -19,7 +27,7 @@
   <h2 class="page-title">Actual Insights</h2>
 
   <div class="tab-bar" role="tablist" aria-label="Actual Insights sections">
-    {#each TABS as tab (tab.id)}
+    {#each tabs as tab (tab.id)}
       <button
         type="button"
         role="tab"
