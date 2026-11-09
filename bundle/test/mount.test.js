@@ -151,3 +151,40 @@ test('a later DOM mutation does not cause the same placeholder to be re-mounted'
 
   expect(calls).toBe(1);
 });
+
+// Editing a Text widget in Actual updates its (moved) placeholder text node in
+// place instead of replacing it, so the widget must be drawn again from the new text.
+describe('a placeholder edited in place', () => {
+  test('is re-rendered from the new text, replacing the old widget instead of stacking a second one', async () => {
+    document.body.innerHTML = '<div id="card"><p id="p">{{INSIGHTS:demo:["a"]}}</p></div>';
+    const destroy = vi.fn();
+    const calls = [];
+    mountWidget('{{INSIGHTS:demo:', (host, config) => {
+      calls.push(config);
+      host.textContent = JSON.stringify(config);
+      return { $destroy: destroy };
+    });
+    expect(calls).toEqual([['a']]);
+
+    // Actual's renderer updates the text node itself, which mounting moved into a hidden wrapper.
+    document.querySelector('.actualmint-hidden-placeholder').firstChild.nodeValue = '{{INSIGHTS:demo:["b"]}}';
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(calls).toEqual([['a'], ['b']]);
+    expect(destroy).toHaveBeenCalledTimes(1);
+    const hosts = document.querySelectorAll('.actualmint-widget-host');
+    expect(hosts.length).toBe(1);
+    expect(hosts[0].textContent).toBe('["b"]');
+    // The new widget sits next to the (hidden) placeholder, not inside it.
+    expect(hosts[0].parentElement.id).toBe('p');
+  });
+
+  test('an unchanged placeholder is not drawn again', async () => {
+    document.body.innerHTML = '<p id="p">{{INSIGHTS:demo2:[1]}}</p>';
+    const render = vi.fn();
+    mountWidget('{{INSIGHTS:demo2:', render);
+    document.body.appendChild(document.createElement('div'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(render).toHaveBeenCalledTimes(1);
+  });
+});

@@ -3,6 +3,8 @@ import { maybeRedirectToReports } from './redirect';
 import { WIDGET_MOUNTERS } from './widget-mounters';
 import { mountWidgetBuilderPanel } from './widget-builder/mount-toolbar';
 import WidgetBuilderPanel from './widget-builder/WidgetBuilderPanel.svelte';
+import { watchEditableWidgets } from './widget-builder/edit-hook';
+import { openBuilder } from './widget-builder/controller';
 import { mountSettingsSection } from './settings-panel/mount-settings';
 import SettingsLinkCard from './settings-panel/SettingsLinkCard.svelte';
 import { mountInsightsPage } from './insights-page/mount-page';
@@ -58,6 +60,14 @@ for (const [widgetId, mount] of Object.entries(WIDGET_MOUNTERS)) {
 // Panel mounting has no dependency on sessionStorage, so it stays outside
 // the try/catch above.
 mountWidgetBuilderPanel(document, window, WidgetBuilderPanel);
+
+// A small edit button on every live widget reopens the builder on it, with its
+// current options loaded back in (read from the widget's own placeholder text).
+try {
+  watchEditableWidgets(document, window, (initial) => openBuilder({ initial }));
+} catch {
+  // No edit buttons; widgets themselves are unaffected.
+}
 
 // Actual's Settings page keeps a one-line "Actual Insights" card pointing
 // at the Insights page, where its controls moved -- see

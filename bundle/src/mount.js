@@ -124,8 +124,17 @@ export function mountWidget(prefix, render) {
   // Keyed by the placeholder text node itself (not the host element it
   // started out in) because wrapping moves the text node under a new
   // parent — tracking by its original parent would make every subsequent
-  // scan see it as "not yet mounted" and re-mount it forever.
-  const mounted = new WeakSet();
+  // scan see it as "not yet mounted" and re-mount it forever. Each entry
+  // remembers the text it rendered, because React updates the (moved) text
+  // node in place when a Text widget is edited: a node whose text has since
+  // changed is rendered again, replacing the old widget.
+  const mounted = new WeakMap();
+  const handled = {
+    has: (node) => {
+      const entry = mounted.get(node);
+      return Boolean(entry) && entry.value === node.nodeValue;
+    },
+  };
   let scheduled = false;
 
   const scan = () => {
@@ -142,11 +151,11 @@ export function mountWidget(prefix, render) {
     // makes each already-handled placeholder's text node invisible to the
     // next call so the walk continues on to find the next one.
     for (;;) {
-      const found = findPlaceholder(prefixes, mounted);
+      const found = findPlaceholder(prefixes, handled);
       if (!found) break;
 
-      const { node: host, textNode, config } = found;
-      mounted.add(textNode);
+      const { textNode, config } = found;
+      const previous = mounted.get(textNode);
 
       // Mutating the DOM ourselves (hiding the placeholder, then letting
       // `render` populate a sibling) would otherwise re-trigger this same
@@ -158,22 +167,38 @@ export function mountWidget(prefix, render) {
       // Hide the original placeholder text non-destructively: wrap it in a
       // span (a raw Text node can't take a style of its own) and hide that
       // span, rather than deleting or clearing a node React created.
-      const hiddenWrapper = document.createElement('span');
-      hiddenWrapper.className = HIDDEN_PLACEHOLDER_CLASS;
-      hiddenWrapper.style.display = 'none';
-      textNode.parentNode.insertBefore(hiddenWrapper, textNode);
-      hiddenWrapper.appendChild(textNode);
+      let hiddenWrapper = textNode.parentNode;
+      if (!previous) {
+        hiddenWrapper = document.createElement('span');
+        hiddenWrapper.className = HIDDEN_PLACEHOLDER_CLASS;
+        hiddenWrapper.style.display = 'none';
+        textNode.parentNode.insertBefore(hiddenWrapper, textNode);
+        hiddenWrapper.appendChild(textNode);
+      } else {
+        // Edited in place: take the old widget down before drawing the new one.
+        try {
+          previous.instance?.$destroy?.();
+        } catch {
+          // Already torn down.
+        }
+        previous.mountHost.remove();
+      }
+      const host = hiddenWrapper.parentElement;
 
       // Mount into a new element of our own rather than the (React-owned)
       // host, so we never need to touch host's existing children again.
       const mountHost = document.createElement('div');
+      // Lets other modules (the widget builder's edit button) find this widget.
+      mountHost.className = 'actualmint-widget-host';
       host.appendChild(mountHost);
 
+      let instance = null;
       try {
-        render(mountHost, config);
+        instance = render(mountHost, config) ?? null;
       } catch (error) {
         console.error('[Actual Insights] mountWidget render callback threw:', error);
       } finally {
+        mounted.set(textNode, { value: textNode.nodeValue, mountHost, instance });
         observer.observe(document.body, OBSERVE_OPTIONS);
       }
     }

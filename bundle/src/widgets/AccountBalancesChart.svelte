@@ -1,5 +1,6 @@
 <script>
   import { scaleTime, scaleLinear, line as d3Line, area as d3Area, stack as d3Stack, extent as d3Extent, timeFormat } from 'd3';
+  import { spreadLabels, heightForLabels, truncateName } from './label-layout';
   import { fetchApi } from '../api-client';
 
   // An empty array (the default) means "every open account," matching the
@@ -60,8 +61,18 @@
   }
 
   const WIDTH = 640;
-  const HEIGHT = 320;
-  const MARGIN = { top: 16, right: 16, bottom: 28, left: 64 };
+  const BASE_HEIGHT = 320;
+  // No y-axis labels are drawn, so there is nothing to reserve left margin for.
+  const MARGIN = { top: 16, right: 16, bottom: 28, left: 12 };
+
+  // The Combined view labels each band in a column to the right of the chart,
+  // joined to its band by a leader line, rather than inside the bands: thin
+  // bands (a small account stacked under a large one) have no room for text,
+  // and labels placed inside them landed on top of each other. The column
+  // spreads its labels out so none overlap (see label-layout.js), and the
+  // chart grows taller when there are more labels than fit.
+  const LABEL_COLUMN = 176;
+  const LABEL_NAME_CHARS = 21;
 
   // Mini (per-account) charts are small sparkline-style area charts with no
   // axes -- the point is the shape and the large balance number next to it,
@@ -209,11 +220,31 @@
     return dates;
   });
 
+  // One row per label: two lines (balance over name) when both show, else one.
+  let labelRowHeight = $derived(labelContent === 'both' ? 34 : 20);
+
+  // Grows past the base height only when the Combined view has more labels
+  // than fit down its column.
+  let chartHeight = $derived(
+    view === 'combined' && data && !isEmpty
+      ? heightForLabels(data.accounts.length, {
+          gap: labelRowHeight,
+          top: MARGIN.top,
+          bottom: MARGIN.bottom,
+          minHeight: BASE_HEIGHT,
+        })
+      : BASE_HEIGHT,
+  );
+
+  // Where the plot ends on the right: the Combined view leaves room for the
+  // label column.
+  let plotRight = $derived(view === 'combined' ? WIDTH - LABEL_COLUMN : WIDTH - MARGIN.right);
+
   let xScale = $derived.by(() => {
     if (allDates.length === 0) return null;
     return scaleTime()
       .domain(d3Extent(allDates))
-      .range([MARGIN.left, WIDTH - MARGIN.right]);
+      .range([MARGIN.left, plotRight]);
   });
 
   let xTicks = $derived(xScale ? xScale.ticks(5) : []);
@@ -283,7 +314,7 @@
     return scaleLinear()
       .domain([min, max])
       .nice()
-      .range([HEIGHT - MARGIN.bottom, MARGIN.top]);
+            .range([chartHeight - MARGIN.bottom, MARGIN.top]);
   });
 
   let stackedAreaGen = $derived.by(() => {
@@ -307,16 +338,23 @@
     return points[points.length - 1].balanceCents;
   }
 
-  // The vertical center of the one-line "name  balance" label drawn inside
-  // this band -- centered in the band's own height where there's room;
-  // clamped to stay inside the band (rather than centered) once the band
-  // gets thin, so the label never spills into its neighbor.
-  function layerLabelY(layer) {
-    const last = layer[layer.length - 1];
-    const bandHeight = stackedYScale(last[0]) - stackedYScale(last[1]);
-    const offset = Math.min(bandHeight / 2, 20);
-    return stackedYScale(last[1]) + Math.max(offset, 18);
-  }
+  // Each band's label, placed in the label column: where it wants to sit is the
+  // band's own vertical centre at its right edge; spreadLabels() then moves
+  // the labels apart just far enough that none overlap.
+  let labelRows = $derived.by(() => {
+    if (!stackedYScale || stackedSeries.length === 0) return [];
+    const centers = stackedSeries.map((layer) => {
+      const last = layer[layer.length - 1];
+      return (stackedYScale(last[0]) + stackedYScale(last[1])) / 2;
+    });
+    const half = labelRowHeight / 2;
+    const placed = spreadLabels(centers, {
+      gap: labelRowHeight,
+      min: MARGIN.top + half,
+      max: chartHeight - MARGIN.bottom - half,
+    });
+    return centers.map((bandY, index) => ({ bandY, labelY: placed[index] }));
+  });
 
   // A noticeably darker shade of this band's own fill color, for the label
   // drawn inside it: same hue (so the label reads as "belonging" to its
@@ -400,7 +438,7 @@
       min -= pad;
       max += pad;
     }
-    return scaleLinear().domain([min, max]).nice().range([HEIGHT - MARGIN.bottom, MARGIN.top]);
+    return scaleLinear().domain([min, max]).nice().range([chartHeight - MARGIN.bottom, MARGIN.top]);
   });
 
   function accountLinePath(points) {
@@ -486,7 +524,7 @@
   {:else if view === 'lines'}
     <svg
       class="balances-svg balances-lines-svg"
-      viewBox="0 0 {WIDTH} {HEIGHT}"
+      viewBox="0 0 {WIDTH} {chartHeight}"
       role="img"
       aria-label="Account balances over time, lines"
     >
@@ -494,7 +532,7 @@
         <path class="balances-line" d={accountLinePath(account.points)} stroke={colorFor(index)} stroke-width="2" fill="none" />
       {/each}
       {#each xTicks as tick (tick.getTime())}
-        <text class="balances-axis-label balances-axis-label--x" x={xScale(tick)} y={HEIGHT - MARGIN.bottom + 16}>
+        <text class="balances-axis-label balances-axis-label--x" x={xScale(tick)} y={chartHeight - MARGIN.bottom + 16}>
           {formatTick(tick)}
         </text>
       {/each}
@@ -508,7 +546,7 @@
   {:else}
     <svg
       class="balances-svg"
-      viewBox="0 0 {WIDTH} {HEIGHT}"
+      viewBox="0 0 {WIDTH} {chartHeight}"
       role="img"
       aria-label="Account balances over time, stacked"
     >
@@ -537,29 +575,39 @@
       {/each}
 
       {#each stackedSeries as layer, index (stackKeys[index])}
-        <text
-          class="balances-area-combined-label"
-          x={WIDTH - MARGIN.right - 12}
-          y={layerLabelY(layer)}
-          text-anchor="end"
-          style:fill={labelColorFor(index)}
-        >
-          {#if labelContent !== 'name'}
-            <tspan class="balances-area-label">{formatCents(layerOwnBalance(index))}</tspan>
-          {/if}
-          {#if labelContent === 'both'}
-            <tspan class="balances-area-name" dx="8">{data.accounts[index].name}</tspan>
-          {:else if labelContent === 'name'}
-            <tspan class="balances-area-name">{data.accounts[index].name}</tspan>
-          {/if}
-        </text>
+        {#if labelRows[index]}
+          {@const row = labelRows[index]}
+          <path
+            class="balances-leader"
+            d="M {plotRight} {row.bandY} L {plotRight + 10} {row.labelY}"
+            stroke={colorFor(index)}
+            stroke-opacity="0.8"
+            fill="none"
+          />
+          <text
+            class="balances-area-combined-label"
+            x={plotRight + 14}
+            y={labelContent === 'both' ? row.labelY - 3 : row.labelY + 5}
+            style:fill={labelColorFor(index)}
+          >
+            <title>{data.accounts[index].name} {formatCents(layerOwnBalance(index))}</title>
+            {#if labelContent !== 'name'}
+              <tspan class="balances-area-label">{formatCents(layerOwnBalance(index))}</tspan>
+            {/if}
+            {#if labelContent === 'both'}
+              <tspan class="balances-area-name" x={plotRight + 14} dy="15">{truncateName(data.accounts[index].name, LABEL_NAME_CHARS)}</tspan>
+            {:else if labelContent === 'name'}
+              <tspan class="balances-area-name">{truncateName(data.accounts[index].name, LABEL_NAME_CHARS)}</tspan>
+            {/if}
+          </text>
+        {/if}
       {/each}
 
       {#each xTicks as tick (tick.getTime())}
         <text
           class="balances-axis-label balances-axis-label--x"
           x={xScale(tick)}
-          y={HEIGHT - MARGIN.bottom + 16}
+          y={chartHeight - MARGIN.bottom + 16}
         >
           {formatTick(tick)}
         </text>
@@ -711,7 +759,7 @@
      band's own color, see labelColorFor()) -- both tspans inherit it, so
      neither rule sets its own fill. */
   .balances-area-combined-label {
-    font-size: 14px;
+    font-size: 12px;
   }
 
   .balances-area-name {
@@ -719,8 +767,12 @@
   }
 
   .balances-area-label {
-    font-size: 17px;
+    font-size: 15px;
     font-weight: 700;
+  }
+
+  .balances-leader {
+    pointer-events: none;
   }
 
   .balances-legend {

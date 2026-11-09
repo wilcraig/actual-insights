@@ -43,7 +43,8 @@ export const WIDGET_REGISTRY = [
     id: 'account-balances',
     label: 'Account balances chart',
     fields: [
-      { key: 'accountIds', type: 'account-multiselect', label: 'Accounts' },
+      // Nothing picked means every open account (see the mount in widget-mounters.js).
+      { key: 'accountIds', type: 'account-multiselect', label: 'Accounts', optional: true },
       {
         key: 'labelContent',
         type: 'select',

@@ -57,3 +57,14 @@ export async function refreshUntilVisible({ doc, win, text, before, waitMs = 250
   }
   return countText(doc, text) > before;
 }
+
+/**
+ * Actual's data layer as the page exposes it (`window.$send`, `$query`, `$q`),
+ * or null when this build of Actual doesn't expose all three.
+ */
+export function actualApi(win) {
+  const { $send: send, $query: query, $q: q } = win;
+  return typeof send === 'function' && typeof query === 'function' && typeof q === 'function'
+    ? { send, query, q }
+    : null;
+}

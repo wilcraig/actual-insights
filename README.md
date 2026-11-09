@@ -40,9 +40,10 @@ Actual ships a new release.
 ## Graph types
 
 Every chart below is added the same way. Open the **Widget builder** on any
-Reports page, pick the chart, then paste the placeholder it generates into a
-new Actual "Text widget" (see [Adding a widget](#adding-a-widget-to-a-reports-page)).
-The placeholder for each chart is listed with it.
+Reports page, pick the chart, set it up while watching it draw, and add it to
+the dashboard (see [Adding a widget](#adding-a-widget-to-a-reports-page)). The
+builder fills in the Text widget for you; the placeholder each chart uses is
+listed with it, for anyone who prefers to type it by hand.
 
 The screenshots use made-up demo data.
 
@@ -720,10 +721,14 @@ tab (see [The Insights page](#the-insights-page)):
 - **Unlinked transfers:** pairs of matching inflows and outflows between
   your accounts that were never linked as a transfer. These double-count as
   income and spending until you link them.
-- **Widget builder:** generates the exact placeholder string for any widget.
-  Pick the type, check off categories, accounts, or groups, and copy the
-  result, so you never hand-write one. It lives next to Actual's own "Add new
-  widget" button on the Reports toolbar.
+- **Widget builder:** a full-screen dialog for building any widget. The
+  options sit on the left and the real widget redraws on the right as you
+  change them. **Add to dashboard** puts it on the dashboard you're viewing as
+  a ready-made Text widget, and **Copy widget text** is there as a fallback. It
+  lives next to Actual's own "Add new widget" button on the Reports toolbar.
+  Every Actual Insights widget on a dashboard also has a small pencil button
+  (shown when you hover it) that reopens the builder on that widget, with its
+  options filled back in, to change it and **Save changes**.
 - **Fresh theme:** a one-click re-skin of Actual's own color palette
   (Budget, Transactions, and Reports alike) into a light, airy teal-and-white
   look.
@@ -741,7 +746,7 @@ tab (see [The Insights page](#the-insights-page)):
 
 | Widget builder | Settings |
 | --- | --- |
-| ![Widget builder button next to Actual's own "Add new widget" button, panel open with a generated placeholder](docs/screenshots/widget-builder.jpg) | ![The Actual Insights card on Actual's Settings page, pointing to the Insights page](docs/screenshots/settings-card.jpg) |
+| ![Widget builder button next to Actual's own "Add new widget" button, with the older drop-down panel open](docs/screenshots/widget-builder.jpg) | ![The Actual Insights card on Actual's Settings page, pointing to the Insights page](docs/screenshots/settings-card.jpg) |
 
 | Text size control |
 | --- |
@@ -821,11 +826,21 @@ means only "on or after `a`". Build date ranges with `dateRange()` in
 
 ## Adding a widget to a Reports page
 
-1. Open the **Widget builder** panel on any Reports page.
-2. Pick a widget type, and fill in any fields (categories, accounts, groups).
-3. Click **Generate**.
-4. Paste the resulting placeholder into a new Actual "Text widget" on your
-   Reports dashboard.
+1. Open a dashboard on the Reports page and click **Widget builder**.
+2. Pick a widget type on the left and set its options (categories, accounts,
+   groups). The preview on the right redraws as you go, and the widget needs
+   its options filled in before it will draw.
+3. Click **Add to dashboard**. The widget appears on the dashboard as a Text
+   widget, already filled in, sized for that kind of chart. Resize or move it
+   with Actual's own **Edit dashboard**.
+4. To change it later, hover the widget and click the pencil, adjust it, and
+   click **Save changes**.
+
+If **Add to dashboard** can't reach Actual's dashboard (it needs a dashboard
+page open), use **Copy widget text** and paste the result into a new Actual
+"Text widget" yourself. The placeholder it copies is the same text the builder
+would have added, and it is also what the pencil reads back, so widgets you
+typed by hand can be edited the same way.
 
 ## License
 

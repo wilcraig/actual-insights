@@ -188,14 +188,15 @@ test('combined view (the default): a stacked area band per account, each labeled
   // way account identity is shown in this view now.
   expect(target.querySelector('.balances-legend')).toBeNull();
 
-  // Default labelContent='both': amount tspan comes first, name tspan
-  // second with a dx gap after it (not a literal space, which SVG would
-  // otherwise collapse).
+  // Default labelContent='both': the amount tspan comes first and the name
+  // tspan sits on its own line beneath it (same x, dy down), in the label
+  // column to the right of the chart.
   const firstLabelText = target.querySelector('.balances-area-combined-label');
-  const [first, second] = firstLabelText.children;
+  const [, first, second] = firstLabelText.children;
   expect(first.classList.contains('balances-area-label')).toBe(true);
   expect(second.classList.contains('balances-area-name')).toBe(true);
-  expect(second.getAttribute('dx')).toBe('8');
+  expect(second.getAttribute('x')).toBe(firstLabelText.getAttribute('x'));
+  expect(Number(second.getAttribute('dy'))).toBeGreaterThan(0);
 });
 
 test('labelContent="amount" shows only the balance, no account name, inside each band', async () => {
@@ -391,8 +392,8 @@ test('an account with a matching account-type goal draws a dashed corridor from 
   expect(x2).toBeGreaterThan(x1);
   // ... and the x-axis stretched out so the domain's max is exactly the
   // goal's own targetDate: scaleTime always maps a domain's max to its
-  // range's own upper bound, WIDTH (640) - MARGIN.right (16).
-  expect(x2).toBeCloseTo(624, 5);
+  // range's own upper bound, WIDTH (640) - LABEL_COLUMN (176).
+  expect(x2).toBeCloseTo(464, 5);
   // The $5,000 target is well above acc1's current $110 balance -- higher
   // on screen means a smaller y pixel value.
   expect(y2).toBeLessThan(y1);
@@ -451,7 +452,7 @@ test('the x-axis extends forward to cover the furthest goal targetDate among sho
   // goal's own targetDate, not merely "somewhere past it."
   const corridor = target.querySelector('.balances-goal-corridor');
   const { x2 } = parseLinePath(corridor.getAttribute('d'));
-  expect(x2).toBeCloseTo(624, 5);
+  expect(x2).toBeCloseTo(464, 5);
 });
 
 test("a goal whose targetDate is in the past clamps the corridor's forward end to today, never drawing backwards", async () => {
@@ -642,4 +643,60 @@ test('the default chart is the stacked combined view', async () => {
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(target.querySelectorAll('path.balances-area')).toHaveLength(2);
   expect(target.querySelectorAll('path.balances-line')).toHaveLength(0);
+});
+
+// A large account stacked with several tiny ones leaves the small bands only a
+// pixel or two tall, so labels drawn at each band's own position used to land
+// on top of one another. Labels now sit in a column and are spread apart.
+function stackedWithThinBands(count) {
+  const days = ['2026-10-24', '2026-10-25', '2026-10-26'];
+  const series = (cents) => days.map((date) => ({ date, balanceCents: cents }));
+  const accounts = [{ id: 'big', name: 'Stayntouch 401k', points: series(17_282_125) }];
+  for (let i = 0; i < count; i += 1) {
+    accounts.push({ id: `small${i}`, name: `Small account ${i}`, points: series(250_000 + i * 90_000) });
+  }
+  const total = accounts.reduce((sum, a) => sum + a.points[0].balanceCents, 0);
+  return { range: '1M', rangeStart: '2026-09-26', rangeEnd: '2026-10-26', accounts, netWorth: series(total) };
+}
+
+test('combined view: labels for thin bands never overlap, and each has a leader line to its band', async () => {
+  fetchApi.mockResolvedValue(jsonResponse(stackedWithThinBands(4)));
+  const target = mountChart();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const labels = [...target.querySelectorAll('.balances-area-combined-label')];
+  expect(labels.length).toBe(5);
+  const ys = labels.map((el) => Number(el.getAttribute('y'))).sort((a, b) => a - b);
+  // Two-line labels (balance over name): at least a full row apart.
+  for (let i = 1; i < ys.length; i += 1) expect(ys[i] - ys[i - 1]).toBeGreaterThanOrEqual(34);
+  expect(target.querySelectorAll('.balances-leader').length).toBe(5);
+});
+
+test('combined view: the chart grows taller instead of squeezing labels when there are many accounts', async () => {
+  fetchApi.mockResolvedValue(jsonResponse(stackedWithThinBands(14)));
+  const target = mountChart();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const [, , , height] = target.querySelector('svg.balances-svg').getAttribute('viewBox').split(' ').map(Number);
+  expect(height).toBeGreaterThan(320);
+  const ys = [...target.querySelectorAll('.balances-area-combined-label')].map((el) => Number(el.getAttribute('y'))).sort((a, b) => a - b);
+  for (let i = 1; i < ys.length; i += 1) expect(ys[i] - ys[i - 1]).toBeGreaterThanOrEqual(34);
+  expect(ys[ys.length - 1]).toBeLessThan(height);
+});
+
+test('combined view: a long account name is shortened in its label but kept whole in the tooltip', async () => {
+  const payload = stackedWithThinBands(1);
+  payload.accounts[1].name = 'Stayntouch Roth Contributions Account';
+  fetchApi.mockResolvedValue(jsonResponse(payload));
+  const target = mountChart();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const names = [...target.querySelectorAll('.balances-area-name')].map((el) => el.textContent.trim());
+  expect(names[1].endsWith('…')).toBe(true);
+  expect(names[1].length).toBeLessThanOrEqual(21);
+  const titles = [...target.querySelectorAll('.balances-area-combined-label title')].map((el) => el.textContent);
+  expect(titles[1]).toContain('Stayntouch Roth Contributions Account');
 });
