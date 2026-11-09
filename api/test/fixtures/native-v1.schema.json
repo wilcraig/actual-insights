@@ -904,6 +904,23 @@
                 "treemap"
               ],
               "description": "How to draw it. Absent means bars."
+            },
+            "monthNav": {
+              "description": "Present only on a breakdown built for one calendar month (spending by category). The app may show previous/next month arrows around the chart: month is the month shown, earliest the first month with any transaction. The next month never goes past the current month. Reload with GET /reports?report=<id>&month=YYYY-MM (the card with the same id) or, below the top level, GET /spending for the other month with the same drill.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "month",
+                "earliest"
+              ],
+              "properties": {
+                "month": {
+                  "$ref": "#/definitions/month"
+                },
+                "earliest": {
+                  "$ref": "#/definitions/month"
+                }
+              }
             }
           }
         },
@@ -1672,6 +1689,10 @@
           "items": {
             "$ref": "#/definitions/spendingTransaction"
           }
+        },
+        "earliestMonth": {
+          "description": "First month with any transaction; bounds the previous-month arrow on the drill screens.",
+          "$ref": "#/definitions/month"
         }
       }
     },

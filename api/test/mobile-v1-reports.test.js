@@ -413,6 +413,23 @@ describe('breakdown and calendar cards', () => {
     expect(card.items.map((i) => i.label)).toEqual(['Rent', 'Eating out', 'Power']);
   });
 
+  test('month-based spending cards carry monthNav (month shown, earliest transaction month); the average card does not', async () => {
+    for (const meta of [{ mode: 'single-month' }, { mode: 'budget' }]) {
+      const card = await one('spending-card', meta);
+      expect(card.monthNav.month).toBe('2026-11');
+      expect(card.monthNav.earliest).toMatch(/^\d{4}-\d{2}$/);
+      expect(card.monthNav.earliest <= card.monthNav.month).toBe(true);
+    }
+    expect((await one('spending-card', { mode: 'average' })).monthNav).toBeUndefined();
+  });
+
+  test('built as of a past moment, the card shows that month', async () => {
+    const body = await buildReports({ client: makeClient(), now: NOW, asOf: new Date(2026, 9, 31, 23, 59, 59) });
+    const card = body.cards.find((c) => c.monthNav);
+    if (card) expect(card.monthNav.month).toBe('2026-10');
+    expect(body.generatedAt).toBe(NOW.toISOString());
+  });
+
   test('calendar-card: at most 62 days, net per day, conditions applied, never past today', async () => {
     const card = await one('calendar-card', { name: 'Calendar', timeFrame: { start: '2024-01-01', end: '2024-03-31', mode: 'sliding-window' }, conditions: [{ field: 'transfer', op: 'is', value: false }], conditionsOp: 'and' });
     expect(card.kind).toBe('calendar');

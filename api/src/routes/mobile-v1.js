@@ -206,15 +206,24 @@ router.get('/budget/:month', readLimit, read((req) => {
 }));
 
 router.get('/reports', readLimit, read((req) => {
-  strictQuery(req, ['report']);
+  strictQuery(req, ['report', 'month']);
   const reportId = req.query.report;
   if (reportId !== undefined && !isValidId(reportId)) throw badRequest();
+  // A past month (not the current one, not the future): every card is built as that month ended.
+  const month = req.query.month;
+  let asOf;
+  if (month !== undefined) {
+    const now = new Date();
+    const current = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    if (!MONTH_PATTERN.test(month) || !monthWithinWindow(month) || month > current) throw badRequest();
+    if (month < current) asOf = new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0, 23, 59, 59);
+  }
   return {
-    key: `reports|${reportId ?? ''}`,
+    key: `reports|${reportId ?? ''}|${asOf ? month : ''}`,
     build: async (client) => {
       // Loaded lazily so a problem in the reports code can only ever break this endpoint.
       const { buildReports } = require('../mobile/v1/reports');
-      return buildReports({ client, now: new Date(), reportId });
+      return buildReports({ client, now: new Date(), reportId, asOf });
     },
   };
 }));

@@ -110,13 +110,25 @@ async function transactionsLevel(client, month, categoryId, payeeId, exclusions)
 }
 
 // `scope`: { level, categoryIds | categoryId | categoryId + payeeId }, already validated.
+// The first month with any transaction (the scoped client hides hidden accounts), or null.
+async function earliestMonth(client) {
+  try {
+    const { data } = await client.aqlQuery(q('transactions').filter({ tombstone: false }).orderBy({ date: 'asc' }).select(['date']).limit(1));
+    const first = data && data[0] && data[0].date;
+    return typeof first === 'string' && /^\d{4}-\d{2}/.test(first) ? first.slice(0, 7) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function buildSpending(client, month, scope, now = new Date()) {
   let body;
   const exclusions = await loadExclusions(client);
   if (scope.level === 'categories') body = await categoriesLevel(client, month, scope.categoryIds, exclusions);
   else if (scope.level === 'payees') body = await payeesLevel(client, month, scope.categoryId, exclusions);
   else body = await transactionsLevel(client, month, scope.categoryId, scope.payeeId, exclusions);
-  return {
+  const first = await earliestMonth(client);
+  const out = {
     schema: 1,
     generatedAt: now.toISOString(),
     month,
@@ -126,6 +138,8 @@ async function buildSpending(client, month, scope, now = new Date()) {
     items: body.items,
     transactions: body.transactions,
   };
+  if (first) out.earliestMonth = first > month ? month : first;
+  return out;
 }
 
 module.exports = { buildSpending, NO_PAYEE_ID };

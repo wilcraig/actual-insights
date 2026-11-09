@@ -178,6 +178,14 @@ function flattenCategories(flow) {
   return out;
 }
 
+// The month arrows of a month-based spending breakdown: the month shown and the first month
+// with any transaction (never after the month shown).
+async function monthNav(ctx, month) {
+  const first = await ctx.earliest();
+  const earliest = typeof first === 'string' && /^\d{4}-\d{2}/.test(first) ? first.slice(0, 7) : month;
+  return { month, earliest: earliest > month ? month : earliest };
+}
+
 async function spendingCard(ctx, meta) {
   const colors = await ctx.colors();
   const mode = meta && meta.mode;
@@ -203,10 +211,10 @@ async function spendingCard(ctx, meta) {
       if (isIncomeGroup(group) || isTransferGroup(group)) continue;
       for (const c of group.categories || []) items.push({ label: c.name, value: Math.max(0, -(c.spent ?? 0)), ...categoryDrill(c.id), ...colors.categoryField(c.id) });
     }
-    return { kind: 'breakdown', chart: 'donut', format: 'money', ...capItems(items), subtitle: `Spent this month, ${month}` };
+    return { kind: 'breakdown', chart: 'donut', format: 'money', ...capItems(items), subtitle: `Spent this month, ${month}`, monthNav: await monthNav(ctx, month) };
   }
   const flow = await loadMonthCashFlow(ctx.client, month, { exclude: await ctx.excludeMonth(month) });
-  return { kind: 'breakdown', chart: 'donut', format: 'money', ...capItems(flattenCategories(flow).map((c) => ({ label: c.label, value: c.value, ...categoryDrill(c.id), ...colors.categoryField(c.id) }))), subtitle: month };
+  return { kind: 'breakdown', chart: 'donut', format: 'money', ...capItems(flattenCategories(flow).map((c) => ({ label: c.label, value: c.value, ...categoryDrill(c.id), ...colors.categoryField(c.id) }))), subtitle: month, monthNav: await monthNav(ctx, month) };
 }
 
 async function calendarCard(ctx, meta) {
@@ -617,9 +625,11 @@ async function buildReportList({ client, now = new Date() } = {}) {
 
 // reportId: omitted = the first dashboard page; a dashboard page id = that
 // page's widgets; a custom report id = one card. Anything else is a 404.
-async function buildReports({ client, now = new Date(), cardTimeoutMs = CARD_TIMEOUT_MS, reportId } = {}) {
+// `asOf` (optional) builds every card as of that moment instead of now, so a past
+// month shows as it ended (the response still says when it was generated).
+async function buildReports({ client, now = new Date(), cardTimeoutMs = CARD_TIMEOUT_MS, reportId, asOf } = {}) {
   const pages = await readPages(client);
-  const ctx = makeContext(client, now);
+  const ctx = makeContext(client, asOf || now);
   let widgets;
   if (reportId === undefined) {
     widgets = await readWidgets(client, pages, pages.length > 0 ? pages[0].id : null);

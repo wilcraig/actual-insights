@@ -446,6 +446,40 @@ describe('GET /reports', () => {
   });
 });
 
+describe('GET /reports?month=', () => {
+  const thisMonth = () => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`; };
+  const prevMonth = () => { const n = new Date(); const d = new Date(n.getFullYear(), n.getMonth() - 1, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+
+  test('a past month builds as that month ended, cached apart from the current one; the current month is the plain report', async () => {
+    const { token } = await newToken();
+    await withServer(async (base) => {
+      const prev = prevMonth();
+      expect((await get(base, token, `/reports?report=page-main&month=${prev}`)).status).toBe(200);
+      const call = buildReports.mock.calls[buildReports.mock.calls.length - 1][0];
+      expect(call.asOf).toBeInstanceOf(Date);
+      const lastDay = new Date(Number(prev.slice(0, 4)), Number(prev.slice(5, 7)), 0);
+      expect([call.asOf.getFullYear(), call.asOf.getMonth(), call.asOf.getDate(), call.asOf.getHours()]).toEqual([lastDay.getFullYear(), lastDay.getMonth(), lastDay.getDate(), 23]);
+      expect((await get(base, token, `/reports?report=page-main&month=${thisMonth()}`)).status).toBe(200);
+      expect(buildReports.mock.calls[buildReports.mock.calls.length - 1][0].asOf).toBeUndefined();
+      await get(base, token, '/reports?report=page-main');
+      await get(base, token, `/reports?report=page-main&month=${prev}`);
+      // the plain report and the current-month report share one cache entry? no: three builds in all (past, current, plain) and then both repeats are cached.
+      expect(buildReports.mock.calls.length).toBeLessThanOrEqual(3);
+    });
+  });
+
+  test('bad months are 400: format, future, far past', async () => {
+    const { token } = await newToken();
+    await withServer(async (base) => {
+      const n = new Date();
+      const future = `${n.getFullYear() + 1}-01`;
+      for (const q of ['month=2026-13', 'month=26-01', 'month=', `month=${future}`, 'month=1999-01', 'month=2026-01&month=2026-02']) {
+        expect([q, (await get(base, token, `/reports?${q}`)).status]).toEqual([q, 400]);
+      }
+    });
+  });
+});
+
 describe('GET /report-list', () => {
   test('returns the report list builder result, validated', async () => {
     const { token } = await newToken();

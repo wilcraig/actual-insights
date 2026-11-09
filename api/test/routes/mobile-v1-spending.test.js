@@ -118,6 +118,8 @@ describe('levels', () => {
       const body = await res.json();
       expectValid('spendingResponse', body);
       expect(body).toMatchObject({ month: '2026-11', level: 'categories', title: 'Selected categories', total: 8423 + 1000 + 1077 + 2800, transactions: [] });
+      expect(body.earliestMonth).toMatch(/^\d{4}-\d{2}$/);
+      expect(body.earliestMonth <= body.month).toBe(true);
       expect(body.items).toEqual(expect.arrayContaining([
         { id: 'c-groc', label: 'Groceries', amount: 10500, drill: { level: 'payees', categoryId: 'c-groc' }, color: 'blue' },
         { id: 'c-fuel', label: 'Fuel', amount: 2800, drill: { level: 'payees', categoryId: 'c-fuel' }, color: 'blue' },

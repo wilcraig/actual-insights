@@ -284,7 +284,11 @@
           }
         ],
         "total": 63000,
-        "chart": "donut"
+        "chart": "donut",
+        "monthNav": {
+          "month": "2026-11",
+          "earliest": "2026-03"
+        }
       },
       {
         "id": "w-4",
@@ -399,7 +403,8 @@
         }
       }
     ],
-    "transactions": []
+    "transactions": [],
+    "earliestMonth": "2026-03"
   },
   "spendingPayees": {
     "schema": 1,
@@ -546,7 +551,11 @@
               ]
             }
           }
-        ]
+        ],
+        "monthNav": {
+          "month": "2026-11",
+          "earliest": "2026-03"
+        }
       },
       {
         "id": "c-2",
