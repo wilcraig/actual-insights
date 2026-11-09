@@ -48,10 +48,30 @@ immediately when the shell is not taking over, or later if the person opens Actu
   The General tab keeps its Chipmunk-mode row.
 - The shell's classes are all prefixed `cm-` (Actual's own CSS has generic `.sidebar`, `.content`... rules that otherwise leak in).
 
-### Not done yet
+### Writes from the desktop shell
 
-Bulk actions on selected transactions (categorize, hide/exclude; needs new server routes), inline editing of budget amounts, drag to reorder,
-right-click context menus, hover tooltips on charts, resizable table columns. The server contract is unchanged (`/api/chipmunk/*` and `/api/mobile/v1`).
+All audited as writer `web`, using the phone's own write logic (`api/src/mobile/v1/write.js`: validation against fresh data, one write at a time, audit line, sync to the Actual server).
+`/api/mobile/v1` is unchanged.
+
+- `PATCH /api/chipmunk/transactions` `{ ids, changes }`: **bulk** edit of up to 50 transactions (the UI batches larger selections), `changes` being one or more of
+  `category` (id or null), `cleared`, `excluded`, `hidden`, `notes`. Unknown keys, duplicate or malformed ids, empty bodies: 400. Any unknown id: 404 and nothing is written.
+  Rows the change is not allowed on (transfer, split parent, closed account, reconciled cleared flag, hidden/excluded conflict) are **skipped and reported**:
+  `{ updated, unchanged, skipped: [{ id, reason }] }`. One write-lock pass; one audit line per changed transaction; **one** Actual sync at the end (none for flag-only changes).
+  The web view is the owner's, so the phone's hidden-accounts scoping is not applied here.
+- `PUT /api/chipmunk/budget/:month/categories/:id` `{ budgeted }` (cents, 0..1e12) and `POST /api/chipmunk/budget/:month/move` `{ from, to, amount }`: the phone's set and move.
+- Transactions table: the selection bar offers Categorize, Mark cleared, Hide, Exclude; the same actions are in the right-click menu (which acts on the selection, or selects the
+  row under the pointer). Every action first shows a plain-words confirmation (what, how many, and that there is no undo in this view for hide/exclude; the filter's **Show hidden**
+  brings hidden rows back, and the menu has Show again / Include).
+- Budget screen: click a category's budgeted amount to edit it in place. Enter saves, Tab saves and moves to the next category, Esc cancels. **Repeat...** in the editor opens the series
+  editor with the typed amount. Right-click a category: Edit amount, Move money from here (pick target and amount), Repeat/Series, Copy name. Right-click a group: expand/collapse.
+- Charts: hover tooltips with label, value and share on donut slices, legend rows, series bars, progress and list rows.
+- Transactions table columns (Date, Category, Amount) resize by dragging the header edge, arrow keys on the edge (Shift for bigger steps), double-click to reset; widths are remembered in `localStorage`.
+
+### Not done
+
+- **Drag to reorder**: the phone data model has no order to write (account order is Actual's sidebar order, read-only; report and category order are not editable through the phone API), so nothing was added.
+- Not covered: bulk notes editing in the UI (the route accepts `notes`), chart tooltips on keyboard focus, unhide for individual rows without the filter.
+- One side effect: the phone API's 15 s read cache is not cleared by a web write (phones can show old values for up to 15 s).
 
 ## How it works
 

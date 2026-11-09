@@ -186,7 +186,7 @@ describe('Transactions table', () => {
     await flush();
     expect(h.querySelector('.selbar').textContent).toContain('2 selected');
     expect(h.querySelector('.selbar').textContent).toContain('$40.00');
-    h.querySelector('.selbar button').click();
+    [...h.querySelectorAll('.selbar button')].find((b) => b.textContent === 'Clear').click();
     await flush();
     expect(h.querySelector('.selbar')).toBeNull();
     rows()[0].click();

@@ -1,5 +1,6 @@
 <script>
   import { colorFor, formatMoney, canShift, shiftMonth } from './logic';
+  import { tip } from './tip';
 
   // One phone-style report card. `onMonth(card, month)` asks for another
   // month of a breakdown card; `busy`/`error` come from the parent.
@@ -52,7 +53,7 @@
     {#if card.chart === 'donut' || card.chart === 'pie'}
       <svg class="donut" viewBox="0 0 100 100" role="img" aria-label="{card.title} chart">
         {#each slices as s}
-          <circle cx="50" cy="50" r={R} fill="none" stroke={s.color} stroke-width={card.chart === 'pie' ? 2 * R : 14} stroke-dasharray="{s.len} {C - s.len}" stroke-dashoffset={-s.offset} transform="rotate(-90 50 50)" />
+          <circle use:tip={`${s.item.label}: ${money(s.item.value)} (${total > 0 ? Math.round((s.item.value / total) * 100) : 0}%)`} cx="50" cy="50" r={R} fill="none" stroke={s.color} stroke-width={card.chart === 'pie' ? 2 * R : 14} stroke-dasharray="{s.len} {C - s.len}" stroke-dashoffset={-s.offset} transform="rotate(-90 50 50)" />
         {/each}
         {#if card.chart !== 'pie'}<text x="50" y="52" text-anchor="middle" font-size="9" fill="currentColor">{money(total)}</text>{/if}
       </svg>
@@ -60,7 +61,7 @@
     <ul class="rows">
       {#each items as item, i}
         {@const share = total > 0 ? Math.round((item.value / total) * 100) : 0}
-        <li>
+        <li use:tip={`${item.label}: ${money(item.value)} (${share}% of ${money(total)})`}>
           <span class="chip" style="background:{colorFor(item.color, i)}"></span>
           <span class="label">{item.label}</span>
           <span class="share">{share}%</span>
@@ -76,17 +77,17 @@
     <svg class="series" viewBox="0 0 {Math.max(1, points.length) * 24} 60" preserveAspectRatio="none" role="img" aria-label="{card.title} chart">
       {#each points as p, i}
         {@const h = (Math.abs(p.value ?? 0) / maxAbs) * 26}
-        <rect x={i * 24 + 4} y={p.value < 0 ? 30 : 30 - h} width="16" height={h} fill={p.value < 0 ? '#dc2626' : '#16a34a'} />
+        <rect use:tip={`${p.label}: ${money(p.value)}`} x={i * 24 + 4} y={p.value < 0 ? 30 : 30 - h} width="16" height={h} fill={p.value < 0 ? '#dc2626' : '#16a34a'} />
       {/each}
     </svg>
     <ul class="rows compact">
-      {#each points.slice(-6) as p}<li><span class="label">{p.label}</span><span class="val">{money(p.value)}</span></li>{/each}
+      {#each points.slice(-6) as p}<li use:tip={`${p.label}: ${money(p.value)}`}><span class="label">{p.label}</span><span class="val">{money(p.value)}</span></li>{/each}
     </ul>
   {:else if card.kind === 'progress'}
     <ul class="rows">
       {#each card.items as it}
         {@const pct = it.target > 0 ? Math.min(100, Math.round((it.current / it.target) * 100)) : 0}
-        <li class="progress">
+        <li class="progress" use:tip={`${it.label}: ${money(it.current)} of ${money(it.target)} (${pct}%)`}>
           <span class="label">{it.label}</span>
           <span class="val">{money(it.current)} of {money(it.target)}</span>
           <span class="bar"><i style="width:{pct}%; background:{it.current > it.target ? '#dc2626' : colorFor(it.color, 0)}"></i></span>
@@ -96,7 +97,7 @@
   {:else if card.kind === 'list'}
     <ul class="rows">
       {#each card.rows as r}
-        <li><span class="label">{r.title}{#if r.subtitle}<small> {r.subtitle}</small>{/if}</span>{#if r.date}<span class="share">{r.date}</span>{/if}<span class="val">{money(r.value)}</span></li>
+        <li use:tip={`${r.title}${r.date ? ` (${r.date})` : ''}: ${money(r.value)}`}><span class="label">{r.title}{#if r.subtitle}<small> {r.subtitle}</small>{/if}</span>{#if r.date}<span class="share">{r.date}</span>{/if}<span class="val">{money(r.value)}</span></li>
       {/each}
     </ul>
   {:else if card.kind === 'gauge'}
@@ -118,7 +119,7 @@
     <ul class="rows compact">
       {#each card.series as s}
         {@const last = [...s.values].reverse().find((v) => v !== null)}
-        <li><span class="label">{s.name}</span><span class="val">{last === undefined ? '–' : money(last)}</span></li>
+        <li use:tip={`${s.name}: ${last === undefined ? 'no value yet' : money(last)}`}><span class="label">{s.name}</span><span class="val">{last === undefined ? '–' : money(last)}</span></li>
       {/each}
     </ul>
     <p class="sub">Latest value per series. The full chart is on Actual's Reports page.</p>

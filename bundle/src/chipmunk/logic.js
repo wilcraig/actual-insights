@@ -217,3 +217,41 @@ export function seriesSummary(series) {
   const name = new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'short', year: 'numeric' });
   return `Repeats until ${name}`;
 }
+
+// Resizable table columns, remembered per browser. Widths are px and clamped.
+const COLS_KEY = 'insights:chipmunk:txColumns';
+export const COLUMN_LIMITS = { date: [70, 220], category: [110, 520], amount: [70, 220] };
+export const DEFAULT_COLUMNS = { date: 110, category: 260, amount: 110 };
+
+export function clampColumn(id, px) {
+  const [min, max] = COLUMN_LIMITS[id] ?? [60, 600];
+  const n = Number(px);
+  return Math.round(Math.max(min, Math.min(max, Number.isFinite(n) ? n : min)));
+}
+
+export function loadColumns(storage) {
+  try {
+    const raw = JSON.parse(storage.getItem(COLS_KEY) || '{}');
+    const out = { ...DEFAULT_COLUMNS };
+    for (const id of Object.keys(DEFAULT_COLUMNS)) if (raw && Number.isFinite(raw[id])) out[id] = clampColumn(id, raw[id]);
+    return out;
+  } catch {
+    return { ...DEFAULT_COLUMNS };
+  }
+}
+
+export function saveColumns(storage, widths) {
+  try {
+    storage.setItem(COLS_KEY, JSON.stringify(widths));
+  } catch {
+    // Blocked storage: widths just are not remembered.
+  }
+}
+
+export function resetColumns(storage) {
+  try {
+    storage.removeItem(COLS_KEY);
+  } catch {
+    // Nothing to forget.
+  }
+}

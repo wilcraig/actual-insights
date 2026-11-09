@@ -6,7 +6,8 @@ const { readSettings, writeSettings } = require('../chipmunk/settings-store');
 const { MONTH_PATTERN, isValidId, monthWithinWindow } = require('../mobile/v1/common');
 const { MAX_LIMIT, DEFAULT_LIMIT, CURSOR_PATTERN, buildAccounts, buildTransactions, buildTransactionSuggest, SUGGEST_MAX_LIMIT, SUGGEST_DEFAULT_LIMIT, buildBudgetMonth } = require('../mobile/v1/read');
 const { saveSeries, deleteSeries, buildSeriesList } = require('../mobile/v1/budget-series');
-const { HttpError, ID_PATTERN } = require('../mobile/v1/common');
+const { HttpError, ID_PATTERN, MAX_NOTE } = require('../mobile/v1/common');
+const { MAX_BULK, updateTransactionsBulk, setBudgetedAmount, moveBudget } = require('../mobile/v1/write');
 
 // Web side of Chipmunk mode, behind the normal Actual-session guard. The data
 // routes are thin: they validate, then call the same builders the phone API
@@ -214,6 +215,65 @@ data.put('/budget-series/:id', sendSeries((req) => {
 data.delete('/budget-series/:id', sendSeries(async (req) => {
   if (!ID_PATTERN.test(req.params.id)) throw new HttpError(400, 'bad_request');
   return { body: await deleteSeries({ tokenId: 'web', id: req.params.id }) };
+}));
+
+// Writes from the web (the owner is the signed-in Actual user, audited as 'web').
+// Same write functions as the phone: one write at a time, everything validated
+// before anything is touched, audit line per change, synced to the Actual server.
+const isCents = (v, min, max) => Number.isInteger(v) && v >= min && v <= max;
+const plainBody = (req, allowed) => {
+  const body = req.body;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'bad_request');
+  const keys = Object.keys(body);
+  if (!keys.every((k) => allowed.includes(k))) throw new HttpError(400, 'bad_request');
+  return body;
+};
+const badReq = () => new HttpError(400, 'bad_request');
+
+const sendWrite = (run) => async (req, res, next) => {
+  try {
+    res.status(200).json(await run(req));
+  } catch (err) {
+    if (err instanceof HttpError) {
+      res.status(err.status).json({ error: err.code });
+      return;
+    }
+    next(err);
+  }
+};
+
+// Bulk transaction edit: {ids: [1..MAX_BULK unique ids], changes: {category | cleared | excluded | hidden}}.
+data.patch('/transactions', sendWrite(async (req) => {
+  const body = plainBody(req, ['ids', 'changes']);
+  const { ids, changes } = body;
+  if (!Array.isArray(ids) || ids.length < 1 || ids.length > MAX_BULK || !ids.every(isValidId) || new Set(ids).size !== ids.length) throw badReq();
+  if (!changes || typeof changes !== 'object' || Array.isArray(changes)) throw badReq();
+  const keys = Object.keys(changes);
+  if (keys.length === 0 || !keys.every((k) => ['category', 'cleared', 'excluded', 'hidden', 'notes'].includes(k))) throw badReq();
+  if ('category' in changes && changes.category !== null && !isValidId(changes.category)) throw badReq();
+  if ('notes' in changes && changes.notes !== null && (typeof changes.notes !== 'string' || changes.notes.length > MAX_NOTE)) throw badReq();
+  for (const k of ['cleared', 'excluded', 'hidden']) if (k in changes && typeof changes[k] !== 'boolean') throw badReq();
+  const clean = {};
+  for (const k of keys) clean[k] = changes[k];
+  return updateTransactionsBulk({ tokenId: 'web', ids, changes: clean });
+}));
+
+// Set one category's budgeted amount for a month (cents).
+data.put('/budget/:month/categories/:id', sendWrite(async (req) => {
+  const { month, id } = req.params;
+  if (!MONTH_PATTERN.test(month) || !monthWithinWindow(month) || !isValidId(id)) throw badReq();
+  const body = plainBody(req, ['budgeted']);
+  if (!isCents(body.budgeted, 0, 1000000000000)) throw badReq();
+  return setBudgetedAmount({ tokenId: 'web', month, categoryId: id, budgeted: body.budgeted });
+}));
+
+// Move budgeted money between two categories in a month (cents).
+data.post('/budget/:month/move', sendWrite(async (req) => {
+  const { month } = req.params;
+  if (!MONTH_PATTERN.test(month) || !monthWithinWindow(month)) throw badReq();
+  const { from, to, amount } = plainBody(req, ['from', 'to', 'amount']);
+  if (!isValidId(from) || !isValidId(to) || from === to || !isCents(amount, 1, 1000000000000)) throw badReq();
+  return moveBudget({ tokenId: 'web', month, from, to, amount });
 }));
 
 module.exports = { modeRouter: mode, dataRouter: data };

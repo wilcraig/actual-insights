@@ -211,3 +211,139 @@ describe('/api/chipmunk budget series (web)', () => {
     });
   });
 });
+
+describe('/api/chipmunk writes (web)', () => {
+  const flagStore = require('../../src/mobile-transaction-flags-store');
+  const now = new Date();
+  const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const updates = () => client.state.calls.filter((c) => c[0] === 'updateTransaction');
+  const auditLines = () => fs.readFileSync(path.join(DATA_DIR, 'mobile-audit.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+
+  describe('PATCH /transactions (bulk)', () => {
+    it('categorizes several rows in one pass: one sync, one audit line each, writer web', async () => {
+      await withServer(async (base) => {
+        const res = await send(base, 'PATCH', '/api/chipmunk/transactions', { ids: ['t-02', 't-03', 't-01'], changes: { category: 'c-groc' } });
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual({ schema: 1, updated: ['t-02', 't-03'], unchanged: ['t-01'], skipped: [] });
+        expect(updates().map((c) => [c[1], c[2]])).toEqual([['t-02', { category: 'c-groc' }], ['t-03', { category: 'c-groc' }]]);
+        expect(client.state.syncs).toBe(1);
+        const lines = auditLines();
+        expect(lines).toHaveLength(2);
+        expect(lines.every((l) => l.tokenId === 'web' && l.op === 'transaction.update')).toBe(true);
+        expect(lines[0]).toMatchObject({ ids: { transaction: 't-02' }, before: { category: null }, after: { category: 'c-groc' } });
+      });
+    });
+
+    it('skips rows the change is not allowed on (transfer, split parent, closed account) and reports them', async () => {
+      await withServer(async (base) => {
+        const res = await send(base, 'PATCH', '/api/chipmunk/transactions', { ids: ['t-02', 't-04', 't-05', 't-08'], changes: { category: 'c-fuel' } });
+        const out = await res.json();
+        expect(out.updated).toEqual(['t-02']);
+        expect(out.skipped.map((s) => s.id).sort()).toEqual(['t-04', 't-05', 't-08']);
+        expect(updates()).toHaveLength(1);
+      });
+    });
+
+    it('a reconciled row keeps its cleared flag (skipped); others are marked cleared', async () => {
+      await withServer(async (base) => {
+        const res = await send(base, 'PATCH', '/api/chipmunk/transactions', { ids: ['t-02', 't-03', 't-11'], changes: { cleared: false } });
+        // t-02/t-03 already uncleared, t-11 reconciled and cleared -> locked
+        expect(await res.json()).toMatchObject({ updated: [], unchanged: ['t-02', 't-03'], skipped: [{ id: 't-11' }] });
+        const res2 = await send(base, 'PATCH', '/api/chipmunk/transactions', { ids: ['t-02', 't-03'], changes: { cleared: true } });
+        expect((await res2.json()).updated).toEqual(['t-02', 't-03']);
+        expect(client.state.syncs).toBe(1);
+      });
+    });
+
+    it('hide / exclude are flags only: no Actual write, no sync, hidden implies excluded', async () => {
+      await withServer(async (base) => {
+        const res = await send(base, 'PATCH', '/api/chipmunk/transactions', { ids: ['t-02', 't-03'], changes: { hidden: true } });
+        expect((await res.json()).updated).toEqual(['t-02', 't-03']);
+        expect(updates()).toHaveLength(0);
+        expect(client.state.syncs).toBe(0);
+        expect(await flagStore.getFlags('t-02')).toEqual({ excluded: true, hidden: true });
+        const ex = await send(base, 'PATCH', '/api/chipmunk/transactions', { ids: ['t-01'], changes: { excluded: true } });
+        expect((await ex.json()).updated).toEqual(['t-01']);
+        expect(await flagStore.getFlags('t-01')).toEqual({ excluded: true, hidden: false });
+      });
+    });
+
+    it('an unknown id is a 404 and nothing is written', async () => {
+      await withServer(async (base) => {
+        const res = await send(base, 'PATCH', '/api/chipmunk/transactions', { ids: ['t-02', 'nope-1'], changes: { category: 'c-groc' } });
+        expect(res.status).toBe(404);
+        expect(updates()).toHaveLength(0);
+      });
+    });
+
+    it('strict validation and the batch limit', async () => {
+      await withServer(async (base) => {
+        const bad = [
+          {},
+          { ids: [], changes: { cleared: true } },
+          { ids: ['t-01'], changes: {} },
+          { ids: ['t-01'], changes: { amount: 5 } },
+          { ids: ['t-01'], changes: { cleared: 'yes' } },
+          { ids: ['t-01'], changes: { category: 'bad id' } },
+          { ids: ['t-01', 't-01'], changes: { cleared: true } },
+          { ids: ['t-01'], changes: { cleared: true }, extra: 1 },
+          { ids: 't-01', changes: { cleared: true } },
+          { ids: Array.from({ length: 51 }, (_, i) => `t-${i}`), changes: { cleared: true } },
+          { ids: ['t-01'], changes: { notes: 'x'.repeat(501) } },
+        ];
+        for (const b of bad) expect([JSON.stringify(b).slice(0, 40), (await send(base, 'PATCH', '/api/chipmunk/transactions', b)).status]).toEqual([JSON.stringify(b).slice(0, 40), 400]);
+        const fifty = Array.from({ length: 50 }, (_, i) => `t-x${i}`);
+        expect((await send(base, 'PATCH', '/api/chipmunk/transactions', { ids: fifty, changes: { cleared: true } })).status).toBe(404); // valid shape, unknown ids
+      });
+    });
+
+    it('needs the session and entitlement', async () => {
+      await withServer(async (base) => {
+        expect((await fetch(`${base}/api/chipmunk/transactions`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status).toBe(401);
+        chipmunkEntitled.mockResolvedValue({ entitled: false, reason: 'none' });
+        expect((await send(base, 'PATCH', '/api/chipmunk/transactions', { ids: ['t-01'], changes: { cleared: true } })).status).toBe(403);
+      });
+    });
+  });
+
+  describe('budget amount writes', () => {
+    it('sets one category amount, audited as web', async () => {
+      await withServer(async (base) => {
+        const res = await send(base, 'PUT', `/api/chipmunk/budget/${month}/categories/c-groc`, { budgeted: 51000 });
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.categories[0]).toMatchObject({ id: 'c-groc', budgeted: 51000 });
+        expect(client.state.calls).toContainEqual(['setBudgetAmount', month, 'c-groc', 51000]);
+        expect(client.state.syncs).toBe(1);
+        expect(auditLines().at(-1)).toMatchObject({ tokenId: 'web', op: 'budget.set', after: { budgeted: 51000 } });
+      });
+    });
+
+    it('moves money between categories, never below zero', async () => {
+      await withServer(async (base) => {
+        const ok = await send(base, 'POST', `/api/chipmunk/budget/${month}/move`, { from: 'c-groc', to: 'c-fuel', amount: 1000 });
+        expect(ok.status).toBe(200);
+        expect(client.state.calls).toContainEqual(['setBudgetAmount', month, 'c-fuel', 19000]);
+        expect((await send(base, 'POST', `/api/chipmunk/budget/${month}/move`, { from: 'c-fuel', to: 'c-groc', amount: 99999999 })).status).toBe(400);
+        expect(auditLines().at(-1)).toMatchObject({ tokenId: 'web', op: 'budget.move' });
+      });
+    });
+
+    it('rejects bad input', async () => {
+      await withServer(async (base) => {
+        const p = (u, b) => send(base, 'PUT', u, b).then((r) => r.status);
+        expect(await p(`/api/chipmunk/budget/${month}/categories/c-groc`, { budgeted: -1 })).toBe(400);
+        expect(await p(`/api/chipmunk/budget/${month}/categories/c-groc`, { budgeted: 1.5 })).toBe(400);
+        expect(await p(`/api/chipmunk/budget/${month}/categories/c-groc`, { budgeted: 5, extra: 1 })).toBe(400);
+        expect(await p(`/api/chipmunk/budget/2026-13/categories/c-groc`, { budgeted: 5 })).toBe(400);
+        expect(await p(`/api/chipmunk/budget/${month}/categories/c-hid`, { budgeted: 5 })).toBe(400);
+        expect(await p(`/api/chipmunk/budget/${month}/categories/c-nope`, { budgeted: 5 })).toBe(404);
+        const mv = (b) => send(base, 'POST', `/api/chipmunk/budget/${month}/move`, b).then((r) => r.status);
+        expect(await mv({ from: 'c-groc', to: 'c-groc', amount: 1 })).toBe(400);
+        expect(await mv({ from: 'c-groc', to: 'c-fuel', amount: 0 })).toBe(400);
+        expect(await mv({ from: 'c-groc', to: 'c-fuel' })).toBe(400);
+        expect(client.state.calls.filter((c) => c[0] === 'setBudgetAmount')).toHaveLength(0);
+      });
+    });
+  });
+});

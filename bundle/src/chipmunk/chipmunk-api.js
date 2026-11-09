@@ -47,3 +47,10 @@ export const getSeriesList = () => call('/api/chipmunk/budget-series');
 export const saveSeries = (body, id = null) =>
   call(id ? `/api/chipmunk/budget-series/${encodeURIComponent(id)}` : '/api/chipmunk/budget-series', json(id ? 'PUT' : 'POST', body));
 export const stopSeries = (id) => call(`/api/chipmunk/budget-series/${encodeURIComponent(id)}`, { method: 'DELETE' });
+
+// Writes (the owner's web view; audited as 'web'). Bulk transaction edit:
+// ids (at most 50) and one set of changes; answers { updated, unchanged, skipped }.
+export const patchTransactions = (ids, changes) => call('/api/chipmunk/transactions', json('PATCH', { ids, changes }));
+export const setBudgeted = (month, categoryId, budgeted) =>
+  call(`/api/chipmunk/budget/${month}/categories/${encodeURIComponent(categoryId)}`, json('PUT', { budgeted }));
+export const moveBudget = (month, { from, to, amount }) => call(`/api/chipmunk/budget/${month}/move`, json('POST', { from, to, amount }));

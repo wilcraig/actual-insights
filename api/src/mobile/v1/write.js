@@ -1,4 +1,5 @@
 const { scopedClient: getActualClient } = require('./hidden');
+const { getActualClient: getRealActualClient } = require('../../actual-client');
 const { MAX_BUDGETED, MAX_MONEY, MAX_NOTE, HttpError, badRequest, notFound, isHidden, isIncome, monthWithinWindow, clip } = require('./common');
 const { getFlags, setFlags } = require('../../mobile-transaction-flags-store');
 const { adjustedBudgetMonth } = require('./exclusions');
@@ -77,65 +78,122 @@ function nextFlags(current, changes) {
 async function updateTransactionFields({ tokenId, transactionId, changes }) {
   return exclusive(async () => {
     const client = await getActualClient();
-
-    const row = await readTransactionRow(client, transactionId);
-    if (!row) throw notFound();
-    const current = row.transaction;
-
-    if ('category' in changes) {
-      if (current.transfer || current.split || row.accountClosed) throw badRequest();
-      if (changes.category !== null) await requireExpenseCategory(client, changes.category);
-    }
-    // A reconciliation locks the cleared flag; notes and category stay editable.
-    if ('cleared' in changes && row.reconciled && changes.cleared !== current.cleared) throw badRequest();
-
-    const flagsBefore = await getFlags(transactionId);
-    const flagsAfter = 'excluded' in changes || 'hidden' in changes ? nextFlags(flagsBefore, changes) : flagsBefore;
-
-    const before = {};
-    const after = {};
-    const fields = {};
-    if ('category' in changes) {
-      const was = current.category ? current.category.id : null;
-      if (changes.category !== was) {
-        fields.category = changes.category;
-        before.category = was;
-        after.category = changes.category;
-      }
-    }
-    if ('notes' in changes) {
-      const next = changes.notes === '' ? null : changes.notes;
-      if (next !== current.notes) {
-        fields.notes = next;
-        before.notes = clipLog(current.notes);
-        after.notes = clipLog(next);
-      }
-    }
-    if ('cleared' in changes && changes.cleared !== current.cleared) {
-      fields.cleared = changes.cleared;
-      before.cleared = current.cleared;
-      after.cleared = changes.cleared;
-    }
-
-    if (Object.keys(fields).length > 0) {
-      await client.updateTransaction(transactionId, fields);
-      await appendAudit({ tokenId, op: 'transaction.update', ids: { transaction: transactionId }, before, after });
-      await syncNow(client);
-    }
-
-    if (flagsAfter.excluded !== flagsBefore.excluded || flagsAfter.hidden !== flagsBefore.hidden) {
-      try {
-        await setFlags(transactionId, flagsAfter);
-      } catch (err) {
-        if (err && err.code === 'FULL') throw badRequest();
-        throw err;
-      }
-      await appendAudit({ tokenId, op: 'transaction.update', ids: { transaction: transactionId }, before: { ...flagsBefore }, after: { ...flagsAfter } });
-    }
+    const plan = await planTransactionChange(client, transactionId, changes);
+    await applyTransactionPlan({ client, tokenId, transactionId, plan, sync: true });
 
     const detail = await buildTransactionDetail(client, transactionId);
     if (!detail) throw notFound();
     return { schema: 1, transaction: detail };
+  });
+}
+
+// Validates one transaction's change against fresh data and works out exactly
+// what would be written, without writing anything. Throws 404 (no such
+// transaction) or 400 (this change is not allowed on it).
+async function planTransactionChange(client, transactionId, changes) {
+  const row = await readTransactionRow(client, transactionId);
+  if (!row) throw notFound();
+  const current = row.transaction;
+
+  if ('category' in changes) {
+    if (current.transfer || current.split || row.accountClosed) throw badRequest();
+    if (changes.category !== null) await requireExpenseCategory(client, changes.category);
+  }
+  // A reconciliation locks the cleared flag; notes and category stay editable.
+  if ('cleared' in changes && row.reconciled && changes.cleared !== current.cleared) throw badRequest();
+
+  const flagsBefore = await getFlags(transactionId);
+  const flagsAfter = 'excluded' in changes || 'hidden' in changes ? nextFlags(flagsBefore, changes) : flagsBefore;
+
+  const before = {};
+  const after = {};
+  const fields = {};
+  if ('category' in changes) {
+    const was = current.category ? current.category.id : null;
+    if (changes.category !== was) {
+      fields.category = changes.category;
+      before.category = was;
+      after.category = changes.category;
+    }
+  }
+  if ('notes' in changes) {
+    const next = changes.notes === '' ? null : changes.notes;
+    if (next !== current.notes) {
+      fields.notes = next;
+      before.notes = clipLog(current.notes);
+      after.notes = clipLog(next);
+    }
+  }
+  if ('cleared' in changes && changes.cleared !== current.cleared) {
+    fields.cleared = changes.cleared;
+    before.cleared = current.cleared;
+    after.cleared = changes.cleared;
+  }
+  return { fields, before, after, flagsBefore, flagsAfter };
+}
+
+// Writes a plan from planTransactionChange: the Actual fields first (audited,
+// and synced at once when `sync`), then the Insights flags (they live here, not
+// in Actual). Returns whether anything changed.
+async function applyTransactionPlan({ client, tokenId, transactionId, plan, sync }) {
+  const { fields, before, after, flagsBefore, flagsAfter } = plan;
+  let changed = false;
+  if (Object.keys(fields).length > 0) {
+    await client.updateTransaction(transactionId, fields);
+    await appendAudit({ tokenId, op: 'transaction.update', ids: { transaction: transactionId }, before, after });
+    if (sync) await syncNow(client);
+    changed = true;
+  }
+  if (flagsAfter.excluded !== flagsBefore.excluded || flagsAfter.hidden !== flagsBefore.hidden) {
+    try {
+      await setFlags(transactionId, flagsAfter);
+    } catch (err) {
+      if (err && err.code === 'FULL') throw badRequest();
+      throw err;
+    }
+    await appendAudit({ tokenId, op: 'transaction.update', ids: { transaction: transactionId }, before: { ...flagsBefore }, after: { ...flagsAfter } });
+    changed = true;
+  }
+  return changed;
+}
+
+// The web's bulk edit (category, cleared, excluded, hidden on up to MAX_BULK
+// transactions). One pass under the write lock: every id is planned against
+// fresh data first (an unknown id is a 404 and nothing is written); rows the
+// change is not allowed on (transfer, split, reconciled, closed account...) are
+// skipped and reported, the rest are written, and Actual is synced ONCE at the
+// end. The owner's web view is not scoped to the phone's hidden accounts.
+const MAX_BULK = 50;
+async function updateTransactionsBulk({ tokenId, ids, changes }) {
+  return exclusive(async () => {
+    const client = await getRealActualClient();
+    const plans = [];
+    const skipped = [];
+    for (const id of ids) {
+      try {
+        plans.push({ id, plan: await planTransactionChange(client, id, changes) });
+      } catch (err) {
+        if (err instanceof HttpError && err.status === 400) skipped.push({ id, reason: 'not_allowed' });
+        else throw err;
+      }
+    }
+    const updated = [];
+    const unchanged = [];
+    let wroteActual = false;
+    for (const { id, plan } of plans) {
+      try {
+        const changed = await applyTransactionPlan({ client, tokenId, transactionId: id, plan, sync: false });
+        if (changed) {
+          updated.push(id);
+          if (Object.keys(plan.fields).length > 0) wroteActual = true;
+        } else unchanged.push(id);
+      } catch (err) {
+        if (err instanceof HttpError && err.status === 400) skipped.push({ id, reason: 'not_allowed' });
+        else throw err;
+      }
+    }
+    if (wroteActual) await syncNow(client);
+    return { schema: 1, updated, unchanged, skipped };
   });
 }
 
@@ -461,4 +519,4 @@ async function setAccountGroup({ tokenId, id, groupId }) {
   });
 }
 
-module.exports = { createGroup, createCategory, updateTransactionFields, splitTransactionLines, removeSplit, setBudgetedAmount, moveBudget, exclusive, syncNow, findCategory, createAccountGroup, renameAccountGroup, deleteAccountGroup, setAccountGroup };
+module.exports = { MAX_BULK, updateTransactionsBulk, createGroup, createCategory, updateTransactionFields, splitTransactionLines, removeSplit, setBudgetedAmount, moveBudget, exclusive, syncNow, findCategory, createAccountGroup, renameAccountGroup, deleteAccountGroup, setAccountGroup };

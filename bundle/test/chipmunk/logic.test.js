@@ -144,3 +144,22 @@ describe('series helpers', () => {
     expect(L.seriesSummary({ mode: 'until', endMonth: '2027-06' })).toBe('Repeats until Jun 2027');
   });
 });
+
+describe('resizable columns', () => {
+  const store = memory();
+  test('defaults, clamping, round trip, junk and blocked storage', () => {
+    expect(L.loadColumns(store)).toEqual(L.DEFAULT_COLUMNS);
+    expect(L.clampColumn('date', 5)).toBe(70);
+    expect(L.clampColumn('date', 9999)).toBe(220);
+    expect(L.clampColumn('date', 'x')).toBe(70);
+    L.saveColumns(store, { date: 140, category: 300, amount: 90 });
+    expect(L.loadColumns(store)).toEqual({ date: 140, category: 300, amount: 90 });
+    store.setItem('insights:chipmunk:txColumns', JSON.stringify({ date: 1, category: 'wide', amount: 99999 }));
+    expect(L.loadColumns(store)).toEqual({ date: 70, category: L.DEFAULT_COLUMNS.category, amount: 220 });
+    store.setItem('insights:chipmunk:txColumns', '{nope');
+    expect(L.loadColumns(store)).toEqual(L.DEFAULT_COLUMNS);
+    const blocked = { getItem() { throw new Error('x'); }, setItem() { throw new Error('x'); } };
+    expect(L.loadColumns(blocked)).toEqual(L.DEFAULT_COLUMNS);
+    expect(() => L.saveColumns(blocked, {})).not.toThrow();
+  });
+});

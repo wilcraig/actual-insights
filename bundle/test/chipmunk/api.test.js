@@ -54,3 +54,15 @@ test('an unreachable API throws "Could not reach insights-api."', async () => {
   expect(err).toBeInstanceOf(api.ChipmunkApiError);
   expect(err.message).toBe('Could not reach insights-api.');
 });
+
+test('write calls', async () => {
+  fetchApi.mockResolvedValue(ok({}));
+  await api.patchTransactions(['t1', 't2'], { hidden: true });
+  await api.setBudgeted('2026-11', 'c 1', 5000);
+  await api.moveBudget('2026-11', { from: 'a', to: 'b', amount: 100 });
+  expect(fetchApi.mock.calls.map((c) => [c[0], c[1]?.method, c[1]?.body])).toEqual([
+    ['/api/chipmunk/transactions', 'PATCH', '{"ids":["t1","t2"],"changes":{"hidden":true}}'],
+    ['/api/chipmunk/budget/2026-11/categories/c%201', 'PUT', '{"budgeted":5000}'],
+    ['/api/chipmunk/budget/2026-11/move', 'POST', '{"from":"a","to":"b","amount":100}'],
+  ]);
+});
