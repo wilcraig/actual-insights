@@ -2,7 +2,6 @@ import { tick } from 'svelte';
 import InsightsPage from './InsightsPage.svelte';
 import { isInsightsPageHash, tabFromHash } from './route';
 import { watchRoute } from '../widget-builder/route-watcher';
-import { getChipmunkMode, refreshChipmunkMode, subscribeChipmunkMode } from '../chipmunk/mode-state';
 
 // Shows the Insights page over Actual's main content region whenever the
 // URL hash is `#actual-insights[/tab]` (see route.js for why it's a hash).
@@ -76,7 +75,7 @@ export function mountInsightsPage(doc, win) {
 
   const page = new InsightsPage({
     target: container,
-    props: { tabId: tabFromHash(win.location.hash, getChipmunkMode().enabled) },
+    props: { tabId: tabFromHash(win.location.hash) },
   });
 
   let open = false;
@@ -210,11 +209,9 @@ export function mountInsightsPage(doc, win) {
   function update() {
     const shouldOpen = isInsightsPageHash(win.location.hash);
     if (shouldOpen) {
-      page.$set({ tabId: tabFromHash(win.location.hash, getChipmunkMode().enabled) });
+      page.$set({ tabId: tabFromHash(win.location.hash) });
       const opening = !open;
       open = true;
-      // Chipmunk mode is a server setting: ask each time the page opens.
-      if (opening) refreshChipmunkMode();
       startObserving();
       place();
       if (opening) announceShown();
@@ -228,15 +225,10 @@ export function mountInsightsPage(doc, win) {
 
   win.addEventListener('hashchange', update);
   win.addEventListener('resize', onWindowResize);
-  // The mode arriving (or being toggled) re-resolves which tab the hash means.
-  const unsubscribeMode = subscribeChipmunkMode(() => {
-    if (open) update();
-  });
   const unwatch = watchRoute(win, update);
 
   return function unmount() {
     unwatch();
-    unsubscribeMode();
     win.removeEventListener('hashchange', update);
     win.removeEventListener('resize', onWindowResize);
     stopObserving();

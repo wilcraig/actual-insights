@@ -3,6 +3,11 @@
   import { getMode, setMode } from './chipmunk-api';
   import { setChipmunkMode } from './mode-state';
 
+  // `confirmOff`: ask before turning it off (the shell's Settings screen does;
+  // the General tab keeps its one-click switch).
+  let { confirmOff = false } = $props();
+  let confirming = $state(false);
+
   // The "Chipmunk mode" switch on the General tab. Hidden until the server
   // answers with a recognisable state, so a failure leaves the tab as it was.
   let loaded = $state(false);
@@ -50,13 +55,27 @@
 
   async function toggle(event) {
     const want = event.target.checked;
+    if (!want && confirmOff) {
+      event.target.checked = true;
+      confirming = true;
+      return;
+    }
+    await save(want, event.target);
+  }
+
+  async function confirmTurnOff() {
+    confirming = false;
+    await save(false, document.getElementById('insights-chipmunk-mode'));
+  }
+
+  async function save(want, box) {
     saving = true;
     errorText = '';
     try {
       if (!apply(await setMode(want))) throw new Error('Unexpected response');
     } catch (err) {
       errorText = err.message || 'Could not save.';
-      event.target.checked = enabled;
+      if (box) box.checked = enabled;
     } finally {
       saving = false;
     }
@@ -69,7 +88,7 @@
       <span class="setting-label">Chipmunk mode</span>
       <span class="setting-desc">
         {#if entitled}
-          Show Reports, Accounts, Transactions and Budget here the way the Chipmunk phone app does.
+          Turns the whole app into Chipmunk: Reports, Accounts, Transactions and Budget, as in the phone app. Use Open Actual in the sidebar to get to Actual itself.
         {:else}
           Open Chipmunk (iPhone, Mac or Android) once with a current subscription to unlock this.
         {/if}
@@ -83,6 +102,13 @@
       {/if}
       {#if serverMode !== 'strict'}
         <span class="setting-desc chipmunk-test-mode">Test mode: this server does not check the subscription{serverMode === 'dev' ? ' properly' : ''}.</span>
+      {/if}
+      {#if confirming}
+        <span class="setting-desc chipmunk-confirm" role="alertdialog" aria-label="Turn off Chipmunk mode">
+          Turn off Chipmunk mode? The whole app goes back to plain Actual.
+          <button type="button" class="chipmunk-confirm-yes" onclick={confirmTurnOff}>Turn off</button>
+          <button type="button" class="chipmunk-confirm-no" onclick={() => (confirming = false)}>Cancel</button>
+        </span>
       {/if}
       {#if errorText}<span class="setting-desc" role="alert">{errorText}</span>{/if}
     </span>

@@ -1,6 +1,4 @@
 import * as L from '../../src/chipmunk/logic';
-import { tabFromHash, insightsHash, navigateToInsights } from '../../src/insights-page/route';
-import { tabsFor, TABS } from '../../src/insights-page/tabs';
 
 const memory = (init = {}) => {
   const m = { ...init };
@@ -144,32 +142,5 @@ describe('series helpers', () => {
   test('summary text', () => {
     expect(L.seriesSummary({ mode: 'indefinite' })).toBe('Repeats every month');
     expect(L.seriesSummary({ mode: 'until', endMonth: '2027-06' })).toBe('Repeats until Jun 2027');
-  });
-});
-
-describe('routing with and without Chipmunk mode', () => {
-  test('off: unchanged', () => {
-    expect(tabFromHash('#actual-insights')).toBe('general');
-    expect(tabFromHash('#actual-insights/reports')).toBe('general');
-    expect(insightsHash('reports')).toBe('#actual-insights');
-    expect(insightsHash('forecast')).toBe('#actual-insights/forecast');
-    expect(tabsFor(false)).toBe(TABS);
-  });
-  test('on: reports is the bare page, general moves, old tabs still work', () => {
-    expect(tabFromHash('#actual-insights', true)).toBe('reports');
-    expect(tabFromHash('#actual-insights/budget', true)).toBe('budget');
-    expect(tabFromHash('#actual-insights/general', true)).toBe('general');
-    expect(tabFromHash('#actual-insights/forecast', true)).toBe('forecast');
-    expect(tabFromHash('#other', true)).toBe('reports');
-    expect(insightsHash('reports', true)).toBe('#actual-insights');
-    expect(insightsHash('general', true)).toBe('#actual-insights/general');
-    expect(insightsHash('accounts', true)).toBe('#actual-insights/accounts');
-    expect(insightsHash(undefined, true)).toBe('#actual-insights');
-    expect(tabsFor(true).map((t) => t.id)).toEqual(['reports', 'accounts', 'transactions', 'budget', 'general', 'summaries', 'channels', 'forecast', 'mobile']);
-  });
-  test('navigate pushes the right hash', () => {
-    const win = { location: { pathname: '/budget', search: '', hash: '' }, history: { state: null, pushState: vi.fn() } };
-    navigateToInsights(win, 'general', true);
-    expect(win.history.pushState).toHaveBeenCalledWith(null, '', '/budget#actual-insights/general');
   });
 });

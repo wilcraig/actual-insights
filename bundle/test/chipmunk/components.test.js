@@ -99,17 +99,10 @@ describe('ChipmunkModeRow subscription state', () => {
 });
 
 describe('InsightsPage tabs', () => {
-  test('off: the five original tabs only', async () => {
+  test('the Insights page keeps its five original tabs, even in Chipmunk mode', async () => {
+    setChipmunkMode({ enabled: true, entitled: true });
     const h = await mount(InsightsPage, { tabId: 'general' });
     expect([...h.querySelectorAll('[role=tab]')].map((t) => t.textContent.trim())).toEqual(['General', 'Summaries', 'Channels', 'Forecast', 'Mobile app']);
-  });
-  test('on: Chipmunk tabs in front, and turning it on live adds them', async () => {
-    api.getReportList.mockResolvedValue({ reports: [], defaultId: null });
-    api.getReports.mockResolvedValue({ cards: [] });
-    const h = await mount(InsightsPage, { tabId: 'reports' });
-    setChipmunkMode({ enabled: true, entitled: true });
-    await flush();
-    expect([...h.querySelectorAll('[role=tab]')].map((t) => t.textContent.trim()).slice(0, 5)).toEqual(['Reports', 'Accounts', 'Transactions', 'Budget', 'General']);
   });
 });
 

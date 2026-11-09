@@ -102,9 +102,11 @@
   {:else if cards.length === 0}
     <p class="note">No reports yet. Add widgets to a dashboard page in Actual's Reports.</p>
   {:else}
+    <div class="cards">
     {#each cards as card (card.id)}
       <ReportCard card={monthCards[card.id] ?? card} {currentMonth} busy={!!busy[card.id]} error={monthErrors[card.id] ?? ''} onMonth={showMonth} />
     {/each}
+    </div>
   {/if}
 </div>
 
@@ -114,6 +116,8 @@
   .title, .title-select { margin: 0; font-size: 18px; font-weight: 600; }
   .title-select { background: transparent; color: inherit; border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: 8px; padding: 4px 8px; max-width: 70%; }
   .refresh { border: 0; background: color-mix(in srgb, currentColor 10%, transparent); color: inherit; border-radius: 999px; padding: 4px 12px; cursor: pointer; }
+  /* Several cards side by side on a wide screen, one column on a phone. */
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; align-items: start; }
   .note { opacity: 0.75; margin: 0; }
   .err { color: #dc2626; opacity: 1; }
 </style>
