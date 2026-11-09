@@ -126,6 +126,25 @@ describe('POST /budget-series', () => {
     });
   });
 
+  it('stops an indefinite series at the last month Actual has, and refuses a bounded one past it', async () => {
+    const token = await newToken();
+    const lastOf = (m) => m;
+    client.getBudgetMonths = jest.fn(async () => ['2026-08', '2026-11', lastOf('2027-02')]);
+    const realGet = client.getBudgetMonth;
+    client.getBudgetMonth = jest.fn(async (month) => {
+      if (month > '2027-02') throw new Error('No budget exists for month: ' + month);
+      return realGet(month);
+    });
+    await withServer(async (base) => {
+      const body = await (await create(base, token, { mode: 'indefinite', months: undefined, startMonth: '2026-11' })).json();
+      expectValid('budgetSeriesResponse', body);
+      expect(body.changes.map((c) => c.month)).toEqual(['2026-11', '2026-12', '2027-01', '2027-02']);
+      expect(body.series.appliedThrough).toBe('2027-02');
+      const past = await create(base, token, { categoryId: 'c-fuel', mode: 'until', untilMonth: '2027-06', months: undefined });
+      expect(past.status).toBe(400);
+    });
+  });
+
   it('dry run changes nothing, needs only read scope, matches the real result', async () => {
     const readToken = await newToken('read');
     await withServer(async (base) => {

@@ -23,7 +23,27 @@ const maxMonth = (a, b) => (monthIndex(a) >= monthIndex(b) ? a : b);
 const endMonthOf = (s) => (s.mode === 'months' ? addMonths(s.startMonth, s.months - 1) : s.mode === 'until' ? s.untilMonth : null);
 
 // The last month the series covers as of `current` (indefinite: current + 12).
-const coverageEnd = (s, current) => endMonthOf(s) || addMonths(current, HORIZON);
+// `last` is the latest month Actual will let us read or write (null if unknown);
+// an indefinite series stops there and is extended by the scheduler as it moves.
+const coverageEnd = (s, current, last = null) => {
+  const end = endMonthOf(s);
+  if (end) return end;
+  const horizon = addMonths(current, HORIZON);
+  return last && monthIndex(last) < monthIndex(horizon) ? last : horizon;
+};
+
+// Actual only has budget months up to a bound a little under a year ahead.
+// Asking for one past it fails, so find the last real month first.
+async function lastAvailableMonth(client) {
+  if (typeof client.getBudgetMonths !== 'function') return null;
+  try {
+    const months = (await client.getBudgetMonths()) || [];
+    const valid = months.filter((m) => MONTH_PATTERN.test(m)).sort();
+    return valid.length ? valid[valid.length - 1] : null;
+  } catch {
+    return null;
+  }
+}
 
 function monthRange(from, to) {
   const out = [];
@@ -120,9 +140,9 @@ async function expenseCategoryOrBadRequest(client, categoryId) {
 // First month a (re)definition writes: never before the current month.
 const writeFrom = (startMonth, current) => maxMonth(startMonth, current);
 
-function plannedMonths(def, current) {
+function plannedMonths(def, current, last = null) {
   const from = writeFrom(def.startMonth, current);
-  const to = coverageEnd(def, current);
+  const to = coverageEnd(def, current, last);
   return monthIndex(from) > monthIndex(to) ? [] : monthRange(from, to);
 }
 
@@ -155,7 +175,10 @@ async function saveSeries({ tokenId, id, body, now = new Date() }) {
       if (list.length >= MAX_SERIES && !def.dryRun) throw badRequest();
     }
 
-    const months = plannedMonths(def, current);
+    const last = await lastAvailableMonth(client);
+    const end = endMonthOf(def);
+    if (end && last && monthIndex(end) > monthIndex(last)) throw badRequest();
+    const months = plannedMonths(def, current, last);
 
     if (def.dryRun) {
       const rows = await readBefore(client, categoryId, months);
@@ -224,11 +247,11 @@ async function applyOne({ id, getClient, now }) {
     const current = currentMonthOf(now);
     let from = writeFrom(s.startMonth, current);
     if (s.appliedThrough) from = maxMonth(from, addMonths(s.appliedThrough, 1));
-    const to = coverageEnd(s, current);
+    const client = await getClient();
+    const to = coverageEnd(s, current, await lastAvailableMonth(client));
     if (monthIndex(from) > monthIndex(to)) return 0;
     const months = monthRange(from, to);
 
-    const client = await getClient();
     const found = await findCategory(client, s.categoryId);
     if (!found || isHidden(found.group, found.category) || isIncome(found.group, found.category)) throw new Error('category unavailable');
 
