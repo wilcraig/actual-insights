@@ -11,16 +11,22 @@ const ON = { enabled: true, entitled: true, reason: 'verified' };
 function makeWin({ pathname = '/budget', hash = '', local = memory(), session = memory() } = {}) {
   const listeners = {};
   const win = {
+    pushed: [],
     location: { pathname, search: '', hash, assign: vi.fn() },
     history: {
       state: null,
-      pushState: vi.fn((s, t, url) => { win.location.hash = url.includes('#') ? url.slice(url.indexOf('#')) : ''; }),
+      pushState: vi.fn((s, t, url) => { win.pushed.push(url); win.location.hash = url.includes('#') ? url.slice(url.indexOf('#')) : ''; }),
       replaceState: vi.fn((s, t, url) => { win.location.hash = url.includes('#') ? url.slice(url.indexOf('#')) : ''; }),
     },
     localStorage: local,
     sessionStorage: session,
     addEventListener: (n, f) => { (listeners[n] ||= []).push(f); },
     removeEventListener: () => {},
+    getComputedStyle: window.getComputedStyle.bind(window),
+    requestAnimationFrame: (f) => setTimeout(f, 0),
+    cancelAnimationFrame: (id) => clearTimeout(id),
+    PopStateEvent: window.PopStateEvent,
+    dispatchEvent: vi.fn((e) => { (listeners[e.type] || []).forEach((f) => f(e)); }),
     emit: (n) => (listeners[n] || []).forEach((f) => f()),
   };
   return win;
@@ -28,14 +34,15 @@ function makeWin({ pathname = '/budget', hash = '', local = memory(), session = 
 
 function fakeShell() {
   const shell = { show: vi.fn(), hide: vi.fn(), destroy: vi.fn() };
-  const mountShell = vi.fn(() => shell);
-  return { shell, mountShell };
+  const out = { shell, actual: null };
+  out.mountShell = vi.fn(({ actual }) => { out.actual = actual; return shell; });
+  return out;
 }
 
-let win; let startActual; let fake; const live = [];
+let win; let startActual; let startReports; let fake; const live = [];
 function run(extra = {}) {
   fake = extra.fake ?? fakeShell();
-  const t = startTakeover({ win, doc: document, mountShell: fake.mountShell, startActual, ...extra.deps });
+  const t = startTakeover({ win, doc: document, mountShell: fake.mountShell, startActual, startReports, ...extra.deps });
   live.push(t);
   return t;
 }
@@ -46,6 +53,7 @@ beforeEach(() => {
   document.body.innerHTML = '<div id="root"><p>Actual</p></div>';
   setChipmunkMode({ enabled: false, entitled: false });
   startActual = vi.fn();
+  startReports = vi.fn();
   win = makeWin();
 });
 
@@ -362,5 +370,129 @@ describe('blocked storage', () => {
     await flush();
     expect(startActual).toHaveBeenCalledTimes(1);
     expect(fake.mountShell).not.toHaveBeenCalled();
+  });
+});
+
+describe('the Reports screen shows Actual in its slot', () => {
+  const slotAt = (box = { left: 248, top: 53, width: 1192, height: 847 }) => Object.assign(document.createElement('div'), { getBoundingClientRect: () => box });
+  async function covered() {
+    win = makeWin({ pathname: '/budget', hash: '#/chipmunk/reports', local: win.localStorage });
+    writeCachedMode(win.localStorage, { enabled: true, entitled: true });
+    getMode.mockResolvedValue(ON);
+    const t = run();
+    await flush();
+    return t;
+  }
+  const root = () => document.getElementById('root');
+
+  test('covered by default; reveal un-hides Actual, starts only the Reports parts and lays it out in the slot', async () => {
+    await covered();
+    expect(root().hasAttribute('inert')).toBe(true);
+    expect(startReports).not.toHaveBeenCalled();
+    fake.actual.reveal(slotAt());
+    expect(startReports).toHaveBeenCalledTimes(1);
+    expect(startActual).not.toHaveBeenCalled(); // the full Actual-side start waits for Open Actual
+    expect(root().hasAttribute('inert')).toBe(false);
+    expect(root().getAttribute('aria-hidden')).toBeNull();
+    expect(root().style.visibility).toBe('');
+    expect(root().style.width).toBe('1192px');
+    expect(root().style.top).toBe('53px');
+  });
+  test('a slot registered while the shell mounts is applied when the shell shows', () => {
+    writeCachedMode(win.localStorage, { enabled: true, entitled: true });
+    getMode.mockReturnValue(new Promise(() => {}));
+    const f = fakeShell();
+    f.mountShell = vi.fn(({ actual }) => { f.actual = actual; actual.reveal(slotAt()); return f.shell; });
+    run({ fake: f });
+    expect(root().hasAttribute('inert')).toBe(false);
+    expect(root().style.width).toBe('1192px');
+  });
+  test('conceal covers Actual again and clears the layout', async () => {
+    await covered();
+    fake.actual.reveal(slotAt());
+    fake.actual.conceal();
+    expect(root().hasAttribute('inert')).toBe(true);
+    expect(root().style.visibility).toBe('hidden');
+    expect(root().style.width).toBe('');
+    expect(root().style.top).toBe('');
+  });
+  test('Open Actual from the Reports screen leaves Actual whole (no leftover layout or inert)', async () => {
+    const t = await covered();
+    fake.actual.reveal(slotAt());
+    t.openActual();
+    expect(root().getAttribute('style') ?? '').toBe('');
+    expect(root().hasAttribute('inert')).toBe(false);
+    expect(startActual).toHaveBeenCalledTimes(1);
+    // and back: the shell shows again and Actual returns to its slot
+    document.querySelector('[data-chipmunk-owned="pill"]').click();
+    expect(root().style.width).toBe('1192px');
+  });
+  test('failure of the shell never leaves Actual laid out in a slot', async () => {
+    writeCachedMode(win.localStorage, { enabled: true, entitled: true });
+    getMode.mockReturnValue(new Promise(() => {}));
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const f = fakeShell();
+    f.shell.show = vi.fn(() => { throw new Error('x'); });
+    f.mountShell = vi.fn(({ actual }) => { f.actual = actual; actual.reveal(slotAt()); return f.shell; });
+    run({ fake: f });
+    expect(root().getAttribute('style') ?? '').toBe('');
+    expect(root().hasAttribute('inert')).toBe(false);
+    err.mockRestore();
+  });
+  test('turning the mode off from the shell restores Actual', async () => {
+    await covered();
+    fake.actual.reveal(slotAt());
+    setChipmunkMode({ enabled: false, entitled: true });
+    expect(root().getAttribute('style') ?? '').toBe('');
+    expect(startActual).toHaveBeenCalledTimes(1);
+  });
+  test('navigate moves Actual with pushState + popstate, keeps the shell hash, and is a no-op on the same path', async () => {
+    await covered();
+    let popped = 0;
+    win.addEventListener('popstate', () => { popped += 1; });
+    fake.actual.navigate('/reports/abc');
+    expect(win.pushed).toEqual(['/reports/abc#/chipmunk/reports']);
+    expect(popped).toBe(1);
+    win.location.pathname = '/reports/abc';
+    fake.actual.navigate('/reports/abc');
+    expect(popped).toBe(1);
+  });
+  test('path listeners hear Actual moving; Actual leaving Reports for its app (after a file loads) is brought back, throttled', async () => {
+    let t0 = 1_000_000;
+    win = makeWin({ pathname: '/', hash: '#/chipmunk/reports', local: win.localStorage });
+    writeCachedMode(win.localStorage, { enabled: true, entitled: true });
+    getMode.mockResolvedValue(ON);
+    run({ deps: { now: () => t0 } });
+    await flush();
+    fake.actual.reveal(slotAt());
+    const seen = [];
+    const off = fake.actual.onPath((p) => seen.push(p));
+    fake.actual.navigate('/reports/d1');
+    win.location.pathname = '/budget'; // the budget file finished loading
+    win.emit('popstate');
+    expect(seen).toContain('/budget');
+    expect(win.pushed.at(-1)).toBe('/reports/d1#/chipmunk/reports');
+    const pushes = win.pushed.length;
+    win.emit('popstate'); // within the throttle: no second push
+    expect(win.pushed.length).toBe(pushes);
+    t0 += 2000;
+    win.emit('popstate');
+    expect(win.pushed.length).toBe(pushes + 1);
+    off();
+    win.location.pathname = '/reports/d1';
+    win.emit('popstate');
+    expect(seen.at(-1)).not.toBe('/reports/d1');
+  });
+  test("Actual's file picker (path /) is left alone so the budget can be opened", async () => {
+    win = makeWin({ pathname: '/', hash: '#/chipmunk/reports', local: win.localStorage });
+    writeCachedMode(win.localStorage, { enabled: true, entitled: true });
+    getMode.mockResolvedValue(ON);
+    run();
+    await flush();
+    fake.actual.reveal(slotAt());
+    fake.actual.navigate('/reports/d1');
+    const pushes = win.pushed.length;
+    win.emit('popstate');
+    expect(win.pushed.length).toBe(pushes);
   });
 });

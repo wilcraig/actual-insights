@@ -11,7 +11,7 @@ Phone width works as a fallback (sidebar becomes a hamburger drawer).
 
 | Screen | Phone behaviour kept | Desktop additions |
 |---|---|---|
-| **Reports** (home) | title dropdown of every dashboard page / saved report, cards in server order, donut month arrows, choice remembered | cards in an auto-fill grid (3+ columns on wide screens) |
+| **Reports** (home) | the report title dropdown (every dashboard page and saved report, choice remembered) | **Actual's own Reports page**, the original experience: the Insights widgets, Add new widget, Widget builder, Edit dashboard, widget editing and removal, all as with the mode off (see below) |
 | **Accounts** | On budget / Off budget, collapsible groups remembered, green/red balances | centred wider column |
 | **Transactions** | one search bar + Filter, typeahead with "add to filter", chips, Uncategorized, paging | dense sortable table (Date/Payee/Category/Amount, `aria-sort`), multi-select (click, Ctrl/Cmd-click, Shift-click range, Space), selected total, detail pane beside the list, `j`/`k`/arrows, Esc |
 | **Budget** | month arrows, collapsed groups, repeat marker, budget-series editor with dry-run review | centred wider column |
@@ -48,6 +48,29 @@ immediately when the shell is not taking over, or later if the person opens Actu
   The General tab keeps its Chipmunk-mode row.
 - The shell's classes are all prefixed `cm-` (Actual's own CSS has generic `.sidebar`, `.content`... rules that otherwise leak in).
 
+### Reports screen: Actual's own page inside the shell
+
+The Reports screen is no longer a Chipmunk card grid. It shows **Actual's real Reports page**, so everything that exists with the mode off is there
+(widget grid, Add new widget, Widget builder modal, Edit dashboard, editing/removing widgets, Actual's own dashboard menu and tooltips). Only the report dropdown is Chipmunk's.
+
+- **How:** Actual's React app stays mounted underneath. On the Reports screen `takeover.js` (`actualApi.reveal(slot)`) un-hides it and `shell/actual-layout.js` sizes
+  `#root` to the screen's slot (`position: relative`, `top`, left margin, width, height; no transform and no z-index, so no stacking context), hides Actual's sidebar(s) and title bar
+  (found from `[data-testid="help-menu-button"]` as in `docs/insights-page-hosting-notes.md`, plus ABT's `.sidebar`), and keeps them hidden while React re-renders. Leaving the screen
+  (`conceal`), Open Actual, turning the mode off or a shell failure undoes all of it (the tests check no leftover style, `inert` or hidden mark).
+- **Layering:** while the Reports screen is up the shell host drops to `z-index: 50`, background transparent and `pointer-events: none` (only the sidebar, top bar and report header take clicks),
+  so Actual's own modals/popovers and the widget builder (z-index 100 and up) layer above the shell chrome. On every other screen the host is the top cover again (`2147483000`) and
+  Actual is `inert`, `aria-hidden` and `visibility: hidden`. The command palette and context menus live in the host and show over the Reports page.
+- **Dropdown:** lists `/api/chipmunk/report-list`. A dashboard page is `/reports/<id>`, a saved report `/reports/custom/<id>` (`shell/report-routes.js`). Picking one moves Actual's router with
+  `history.pushState` + a `popstate` event (react-router listens to it), keeping the shell hash. It also follows Actual: switching dashboard in Actual's own menu updates the dropdown, and a dashboard just created
+  in Actual is picked up (the list is re-read at 0.8, 3 and 8 s while the server catches up on the sync). Choice order on entering: the palette's pick, the report Actual is already on, the remembered choice, the default dashboard.
+  The palette's "Report: ..." entries use the same path.
+- **Keys:** the shell's Ctrl/Cmd-K and screen shortcuts stop propagation, so Actual's own search does not open on top of the palette.
+- **Needs a budget open:** Actual shows its Reports page only after a budget file is loaded in this browser. On a browser that has not opened it yet, Actual shows its file picker in the slot with a
+  note ("Actual needs your budget file open in this browser"); once the file loads and Actual lands on `/budget`, the shell sends it back to Reports (at most once every 1.5 s). `/login` and `/bootstrap` still fail open to plain Actual.
+- **What starts:** only the Reports parts of the Actual-side bundle (`startReports()`: widget mounting, the builder, edit buttons) start for the Reports screen. The rest (redirect to Reports, the Insights overlay,
+  the Settings card, the sidebar entry) starts only on Open Actual / mode off / failure, so the Insights page inside the shell is not mounted twice. With the mode off the sequence is the same as before.
+- **Removed:** the Chipmunk card grid (`ReportsTab`, `ReportCard`, chart tooltips) had no remaining user and is gone. `/api/chipmunk/reports` and `getReports` stay (server contract unchanged) but are unused by the web UI.
+
 ### Writes from the desktop shell
 
 All audited as writer `web`, using the phone's own write logic (`api/src/mobile/v1/write.js`: validation against fresh data, one write at a time, audit line, sync to the Actual server).
@@ -64,13 +87,12 @@ All audited as writer `web`, using the phone's own write logic (`api/src/mobile/
   brings hidden rows back, and the menu has Show again / Include).
 - Budget screen: click a category's budgeted amount to edit it in place. Enter saves, Tab saves and moves to the next category, Esc cancels. **Repeat...** in the editor opens the series
   editor with the typed amount. Right-click a category: Edit amount, Move money from here (pick target and amount), Repeat/Series, Copy name. Right-click a group: expand/collapse.
-- Charts: hover tooltips with label, value and share on donut slices, legend rows, series bars, progress and list rows.
 - Transactions table columns (Date, Category, Amount) resize by dragging the header edge, arrow keys on the edge (Shift for bigger steps), double-click to reset; widths are remembered in `localStorage`.
 
 ### Not done
 
 - **Drag to reorder**: the phone data model has no order to write (account order is Actual's sidebar order, read-only; report and category order are not editable through the phone API), so nothing was added.
-- Not covered: bulk notes editing in the UI (the route accepts `notes`), chart tooltips on keyboard focus, unhide for individual rows without the filter.
+- Not covered: bulk notes editing in the UI (the route accepts `notes`), unhide for individual rows without the filter.
 - One side effect: the phone API's 15 s read cache is not cleared by a web write (phones can show old values for up to 15 s).
 
 ## How it works

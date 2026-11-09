@@ -8,3 +8,13 @@ export function takeTxHandoff() {
   pending = null;
   return v;
 }
+
+// Same idea for the report dropdown: the palette picks a report, the Reports
+// screen takes the pick when it (re)mounts.
+let pendingReport = null;
+export const setReportHandoff = (id) => { pendingReport = id; };
+export function takeReportHandoff() {
+  const v = pendingReport;
+  pendingReport = null;
+  return v;
+}

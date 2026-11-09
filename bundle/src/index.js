@@ -45,6 +45,33 @@ watchActualTheme(document, () => {
   }
 });
 
+// What Actual's Reports page needs: Insights widget mounting, the widget
+// builder, and the edit buttons on live widgets. Idempotent, so the shell's
+// Reports screen can start it early and startActual() can still run it.
+let reportsStarted = false;
+function startReports() {
+  if (reportsStarted) return;
+  reportsStarted = true;
+
+  // Every widget's mount callback (and the placeholder shape it expects) lives in
+  // widget-mounters.js, shared with the widget builder's live preview.
+  for (const [widgetId, mount] of Object.entries(WIDGET_MOUNTERS)) {
+    mountWidget(`{{INSIGHTS:${widgetId}:`, mount);
+  }
+
+  // Panel mounting has no dependency on sessionStorage, so it stays outside
+  // the try/catch in startActual.
+  mountWidgetBuilderPanel(document, window, WidgetBuilderPanel);
+
+  // A small edit button on every live widget reopens the builder on it, with its
+  // current options loaded back in (read from the widget's own placeholder text).
+  try {
+    watchEditableWidgets(document, window, (initial) => openBuilder({ initial }));
+  } catch {
+    // No edit buttons; widgets themselves are unaffected.
+  }
+}
+
 // Everything that belongs to Actual's own UI (the redirect to Reports, widget
 // mounting, the builder, the Insights page and its sidebar entry). Runs once:
 // at once on a normal load, or later if Chipmunk mode's shell covers Actual and
@@ -61,23 +88,7 @@ function startActual() {
     // pacing-bars widget below from mounting.
   }
 
-  // Every widget's mount callback (and the placeholder shape it expects) lives in
-  // widget-mounters.js, shared with the widget builder's live preview.
-  for (const [widgetId, mount] of Object.entries(WIDGET_MOUNTERS)) {
-    mountWidget(`{{INSIGHTS:${widgetId}:`, mount);
-  }
-
-  // Panel mounting has no dependency on sessionStorage, so it stays outside
-  // the try/catch above.
-  mountWidgetBuilderPanel(document, window, WidgetBuilderPanel);
-
-  // A small edit button on every live widget reopens the builder on it, with its
-  // current options loaded back in (read from the widget's own placeholder text).
-  try {
-    watchEditableWidgets(document, window, (initial) => openBuilder({ initial }));
-  } catch {
-    // No edit buttons; widgets themselves are unaffected.
-  }
+  startReports();
 
   // Actual's Settings page keeps a one-line "Actual Insights" card pointing
   // at the Insights page, where its controls moved -- see
@@ -108,8 +119,9 @@ try {
   startTakeover({
     win: window,
     doc: document,
-    mountShell: ({ openActual }) => mountChipmunkShell(document, window, { openActual }),
+    mountShell: ({ openActual, actual }) => mountChipmunkShell(document, window, { openActual, actual }),
     startActual,
+    startReports,
   });
 } catch (err) {
   console.error('chipmunk takeover failed to start:', err);

@@ -1,6 +1,8 @@
 import { getMode } from '../chipmunk-api';
 import { getChipmunkMode, setChipmunkMode, subscribeChipmunkMode } from '../mode-state';
 import { isShellHash } from './routes';
+import { applyActualLayout } from './actual-layout';
+import { isReportsPath } from './report-routes';
 
 // Whole-app Chipmunk mode: decides, on every page load, whether the Chipmunk
 // shell covers Actual, and runs the escape hatches (Open Actual for this
@@ -58,10 +60,11 @@ function inertTargets(doc) {
 /**
  * @param {{ win: Window, doc: Document, mountShell: Function, startActual: Function,
  *           getModeFn?: Function, now?: () => number }} deps
- *   mountShell({ openActual }) returns { show(), hide(), destroy() } or throws.
- *   startActual() runs everything Actual-side (once).
+ *   mountShell({ openActual, actual }) returns { show(), hide(), destroy() } or throws.
+ *   startActual() runs everything Actual-side (once); startReports() only what Actual's
+ *   Reports page needs (widget mounting, the widget builder), for the Reports screen.
  */
-export function startTakeover({ win, doc, mountShell, startActual, getModeFn = getMode, now = () => Date.now() }) {
+export function startTakeover({ win, doc, mountShell, startActual, startReports = () => {}, getModeFn = getMode, now = () => Date.now() }) {
   const local = guard(() => win.localStorage);
   const session = guard(() => win.sessionStorage);
   let bypassed = session ? isBypassed(session) : false;
@@ -76,6 +79,12 @@ export function startTakeover({ win, doc, mountShell, startActual, getModeFn = g
   let lastCheck = 0;
   let checking = false;
   let lastShellHash = null;
+  // The Reports screen shows Actual's own Reports page in `revealSlot`.
+  let revealSlot = null;
+  let undoLayout = null;
+  let desiredPath = null;
+  let lastRenav = 0;
+  const pathListeners = new Set();
 
   const cached = local ? readCachedMode(local, now()) : null;
   if (cached) setChipmunkMode(cached);
@@ -94,21 +103,48 @@ export function startTakeover({ win, doc, mountShell, startActual, getModeFn = g
       ariaHidden: el.getAttribute('aria-hidden'),
       visibility: el.style.visibility,
     }));
-    for (const { el } of covered) {
-      el.setAttribute('inert', '');
-      el.setAttribute('aria-hidden', 'true');
-      el.style.visibility = 'hidden';
+    setHidden(true);
+  }
+
+  function setHidden(on) {
+    for (const c of covered) {
+      if (on) {
+        c.el.setAttribute('inert', '');
+        c.el.setAttribute('aria-hidden', 'true');
+        c.el.style.visibility = 'hidden';
+      } else {
+        c.el.toggleAttribute('inert', c.inert);
+        if (c.ariaHidden === null) c.el.removeAttribute('aria-hidden');
+        else c.el.setAttribute('aria-hidden', c.ariaHidden);
+        c.el.style.visibility = c.visibility;
+      }
+    }
+  }
+
+  function clearLayout() {
+    if (undoLayout) {
+      undoLayout();
+      undoLayout = null;
     }
   }
 
   function uncover() {
-    for (const c of covered) {
-      c.el.toggleAttribute('inert', c.inert);
-      if (c.ariaHidden === null) c.el.removeAttribute('aria-hidden');
-      else c.el.setAttribute('aria-hidden', c.ariaHidden);
-      c.el.style.visibility = c.visibility;
-    }
+    clearLayout();
+    setHidden(false);
     covered = [];
+  }
+
+  // Covered, except that on the Reports screen Actual shows through in its slot.
+  function syncReveal() {
+    if (!showing || covered.length === 0) return;
+    clearLayout();
+    if (!revealSlot) {
+      setHidden(true);
+      return;
+    }
+    startReports();
+    setHidden(false);
+    undoLayout = applyActualLayout(doc, win, revealSlot);
   }
 
   // Leaving for Actual on purpose (Open Actual) drops any shell address, the
@@ -164,6 +200,29 @@ export function startTakeover({ win, doc, mountShell, startActual, getModeFn = g
     doc.body.appendChild(pill);
   }
 
+  // What the shell's Reports screen uses to show Actual's own page in its slot.
+  const actualApi = {
+    reveal(slot) {
+      revealSlot = slot;
+      syncReveal();
+    },
+    conceal() {
+      revealSlot = null;
+      syncReveal();
+    },
+    // Moves Actual's router (react-router listens to popstate) to a path, keeping the shell hash.
+    navigate(path) {
+      desiredPath = path;
+      if (`${win.location.pathname}${win.location.search}` === path) return;
+      win.history.pushState(win.history.state, '', `${path}${win.location.hash}`);
+      win.dispatchEvent(new win.PopStateEvent('popstate', { state: win.history.state }));
+    },
+    onPath(fn) {
+      pathListeners.add(fn);
+      return () => pathListeners.delete(fn);
+    },
+  };
+
   function fail(err) {
     console.error('chipmunk shell failed, showing Actual:', err);
     broken = true;
@@ -183,10 +242,11 @@ export function startTakeover({ win, doc, mountShell, startActual, getModeFn = g
   function showShell() {
     if (showing) return;
     try {
-      if (!shell) shell = mountShell({ openActual });
+      if (!shell) shell = mountShell({ openActual, actual: actualApi });
       cover();
       shell.show();
       showing = true;
+      syncReveal();
       showPill(false);
     } catch (err) {
       fail(err);
@@ -288,6 +348,12 @@ export function startTakeover({ win, doc, mountShell, startActual, getModeFn = g
   // After any other failed check, retry as the user moves around, at most every RETRY_MS.
   const onRoute = () => {
     if (disposed) return;
+    for (const fn of pathListeners) fn(win.location.pathname);
+    // Actual left Reports for its app (it lands on /budget after a budget file loads): bring it back.
+    if (showing && revealSlot && desiredPath && !isReportsPath(win.location.pathname) && win.location.pathname !== '/' && !isAuthPath(win.location.pathname) && now() - lastRenav > 1500) {
+      lastRenav = now();
+      actualApi.navigate(desiredPath);
+    }
     const authNow = isAuthPath(win.location.pathname);
     if (authNow) {
       sawAuth = true;

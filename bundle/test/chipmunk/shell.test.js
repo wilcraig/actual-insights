@@ -8,6 +8,7 @@ import { setChipmunkMode } from '../../src/chipmunk/mode-state';
 import ChipmunkShell from '../../src/chipmunk/shell/ChipmunkShell.svelte';
 import TransactionsTab from '../../src/chipmunk/TransactionsTab.svelte';
 import { mountChipmunkShell } from '../../src/chipmunk/shell/mount-shell';
+import { setReportHandoff } from '../../src/chipmunk/shell/handoff';
 
 const flush = async () => { for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0)); };
 let app;
@@ -225,5 +226,126 @@ describe('mountChipmunkShell', () => {
     expect(hostEl.style.display).toBe('block');
     s.destroy();
     expect(document.querySelector('[data-chipmunk-shell]')).toBeNull();
+  });
+});
+
+describe('Reports screen: Actual\'s own page with the Chipmunk report dropdown', () => {
+  const REPORTS = { reports: [{ id: 'd1', title: 'Main', kind: 'dashboard' }, { id: 'd2', title: 'Other', kind: 'dashboard' }, { id: 'c1', title: 'Saved', kind: 'custom' }], defaultId: 'd1' };
+  let paths;
+  let actual;
+  let hostEl;
+  const mountReports = async (props = {}) => {
+    document.body.innerHTML = '<div id="host"></div>';
+    hostEl = document.createElement('div');
+    document.body.appendChild(hostEl);
+    paths = [];
+    actual = { reveal: vi.fn(), conceal: vi.fn(), navigate: vi.fn(), onPath: vi.fn((cb) => { paths.push(cb); return () => { paths = paths.filter((x) => x !== cb); }; }) };
+    app = new ChipmunkShell({ target: host(), props: { openActual: vi.fn(), actual, host: hostEl, ...props } });
+    await flush();
+    return host();
+  };
+  const select = (h) => h.querySelector('.cm-title-select');
+  beforeEach(() => {
+    api.getReportList.mockResolvedValue(REPORTS);
+    history.replaceState(null, '', '/budget#/chipmunk/reports');
+  });
+
+  test('the dropdown lists dashboards then saved reports; the slot is revealed and Actual goes to the default dashboard', async () => {
+    const h = await mountReports();
+    expect([...select(h).options].map((o) => o.textContent)).toEqual(['Main', 'Other', 'Saved']);
+    expect(actual.reveal).toHaveBeenCalledTimes(1);
+    expect(actual.reveal.mock.calls[0][0].dataset.testid).toBe('cm-actual-slot');
+    expect(actual.navigate).toHaveBeenLastCalledWith('/reports/d1');
+    expect(select(h).value).toBe('d1');
+    expect(api.getReports).not.toHaveBeenCalled(); // no more Chipmunk cards
+  });
+  test('picking a dashboard or a saved report moves Actual there and is remembered', async () => {
+    const h = await mountReports();
+    select(h).value = 'c1';
+    select(h).dispatchEvent(new Event('change', { bubbles: true }));
+    await flush();
+    expect(actual.navigate).toHaveBeenLastCalledWith('/reports/custom/c1');
+    expect(localStorage.getItem('insights:chipmunk:report')).toBe('c1');
+    select(h).value = 'd2';
+    select(h).dispatchEvent(new Event('change', { bubbles: true }));
+    await flush();
+    expect(actual.navigate).toHaveBeenLastCalledWith('/reports/d2');
+  });
+  test('the remembered choice is used next time; the palette\'s pick wins over it', async () => {
+    localStorage.setItem('insights:chipmunk:report', 'd2');
+    let h = await mountReports();
+    expect(actual.navigate).toHaveBeenLastCalledWith('/reports/d2');
+    app.$destroy();
+    setReportHandoff('c1');
+    h = await mountReports();
+    expect(actual.navigate).toHaveBeenLastCalledWith('/reports/custom/c1');
+    expect(select(h).value).toBe('c1');
+  });
+  test('when Actual is already on a report, that report is shown in the dropdown', async () => {
+    history.replaceState(null, '', '/reports/d2#/chipmunk/reports');
+    localStorage.setItem('insights:chipmunk:report', 'd1');
+    const h = await mountReports();
+    expect(select(h).value).toBe('d2');
+  });
+  test('Actual moving by itself (its own dashboard menu) is followed', async () => {
+    const h = await mountReports();
+    paths.forEach((cb) => cb('/reports/custom/c1'));
+    await flush();
+    expect(select(h).value).toBe('c1');
+    paths.forEach((cb) => cb('/reports/d2'));
+    await flush();
+    expect(select(h).value).toBe('d2');
+  });
+  test('a dashboard created in Actual appears in the list (re-read a few times while the server catches up)', async () => {
+    const h = await mountReports();
+    api.getReportList.mockResolvedValue({ ...REPORTS, reports: [...REPORTS.reports, { id: 'd3', title: 'New dashboard', kind: 'dashboard' }] });
+    history.replaceState(null, '', '/reports/d3#/chipmunk/reports');
+    paths.forEach((cb) => cb('/reports/d3'));
+    await new Promise((r) => setTimeout(r, 1000)); // the first re-read is due after 800 ms
+    await flush();
+    expect([...select(h).options].map((o) => o.textContent)).toContain('New dashboard');
+    expect(select(h).value).toBe('d3');
+  });
+  test('a note appears while Actual is not on Reports (budget file not open yet) and goes when it is', async () => {
+    const h = await mountReports();
+    expect(h.querySelector('.cm-reports-note').textContent).toContain('budget file');
+    paths.forEach((cb) => cb('/reports/d1'));
+    await flush();
+    expect(h.querySelector('.cm-reports-note')).toBeNull();
+  });
+  test('a failing list still reveals Actual\'s Reports page, with the error shown', async () => {
+    api.getReportList.mockRejectedValue(new Error('down'));
+    const h = await mountReports();
+    expect(actual.reveal).toHaveBeenCalled();
+    expect(actual.navigate).toHaveBeenLastCalledWith('/reports');
+    expect(h.querySelector('.cm-reports-note').textContent).toBe('down');
+    expect(select(h)).toBeNull();
+  });
+  test('the host sinks below Actual\'s modals and goes click-through on Reports, and is a full cover elsewhere', async () => {
+    const h = await mountReports();
+    expect(hostEl.style.zIndex).toBe('50');
+    expect(hostEl.style.pointerEvents).toBe('none');
+    expect(hostEl.style.background).toBe('transparent');
+    [...h.querySelectorAll('.cm-sidebar a')].find((a) => a.textContent.includes('Accounts')).click();
+    await flush();
+    expect(actual.conceal).toHaveBeenCalledTimes(1);
+    expect(hostEl.style.zIndex).toBe('2147483000');
+    expect(hostEl.style.pointerEvents).toBe('');
+    [...h.querySelectorAll('.cm-sidebar a')].find((a) => a.textContent.includes('Reports')).click();
+    await flush();
+    expect(actual.reveal).toHaveBeenCalledTimes(2);
+    expect(hostEl.style.zIndex).toBe('50');
+  });
+  test('the palette report entries switch the report even when Reports is already open', async () => {
+    const h = await mountReports();
+    await key({ key: 'k', ctrlKey: true });
+    [...h.querySelectorAll('.cm-pal-list button')].find((b) => b.textContent.includes('Report: Saved')).click();
+    await flush();
+    expect(actual.navigate).toHaveBeenLastCalledWith('/reports/custom/c1');
+    expect(select(h).value).toBe('c1');
+  });
+  test('without Actual (nothing to reveal) the screen still stands', async () => {
+    const h = await mountReports({ actual: null });
+    expect(select(h)).not.toBeNull();
   });
 });

@@ -7,8 +7,6 @@ vi.mock('../../src/chipmunk/chipmunk-api', async (orig) => ({
 import * as api from '../../src/chipmunk/chipmunk-api';
 import TransactionsTab from '../../src/chipmunk/TransactionsTab.svelte';
 import BudgetTab from '../../src/chipmunk/BudgetTab.svelte';
-import ReportCard from '../../src/chipmunk/ReportCard.svelte';
-import { tip } from '../../src/chipmunk/tip';
 
 const flush = async () => { for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0)); };
 let app;
@@ -268,39 +266,5 @@ describe('budget: inline editing, move, context menu', () => {
     byText(document, 'Expand group', '[role=menuitem]').click();
     await flush();
     expect(h.querySelectorAll('.cat')).toHaveLength(2);
-  });
-});
-
-describe('chart tooltips', () => {
-  const donut = { id: 'c1', kind: 'breakdown', title: 'Spending', format: 'money', chart: 'donut', total: 10000, items: [{ label: 'Food', value: 7500 }, { label: 'Fuel', value: 2500 }] };
-  const tipEl = () => document.querySelector('[data-chipmunk-owned="tip"]');
-  const hover = async (el) => { el.dispatchEvent(new MouseEvent('mouseenter', { clientX: 20, clientY: 20 })); await flush(); };
-  test('a donut slice shows its label, value and share while hovered, and hides after', async () => {
-    const h = await mount(ReportCard, { card: donut });
-    const slice = h.querySelector('circle');
-    expect(slice.getAttribute('data-tip')).toBe('Food: $75.00 (75%)');
-    await hover(slice);
-    expect(tipEl().style.display).toBe('block');
-    expect(tipEl().textContent).toBe('Food: $75.00 (75%)');
-    slice.dispatchEvent(new MouseEvent('mouseleave'));
-    expect(tipEl().style.display).toBe('none');
-  });
-  test('legend rows, series bars and progress rows carry values too', async () => {
-    let h = await mount(ReportCard, { card: donut });
-    expect(h.querySelector('.rows li').getAttribute('data-tip')).toBe('Food: $75.00 (75% of $100.00)');
-    h = await mount(ReportCard, { card: { id: 's', kind: 'series', title: 'Net', format: 'money', points: [{ label: '2026-10', value: 5000 }, { label: '2026-11', value: -2000 }] } });
-    expect([...h.querySelectorAll('rect')].map((r) => r.getAttribute('data-tip'))).toEqual(['2026-10: $50.00', '2026-11: -$20.00']);
-    h = await mount(ReportCard, { card: { id: 'p', kind: 'progress', title: 'Goals', format: 'money', items: [{ label: 'Trip', current: 5000, target: 10000, color: 'blue' }] } });
-    expect(h.querySelector('li.progress').getAttribute('data-tip')).toBe('Trip: $50.00 of $100.00 (50%)');
-  });
-  test('the action updates its text and cleans up', () => {
-    const node = document.createElement('div');
-    document.body.appendChild(node);
-    const a = tip(node, 'one');
-    a.update('two');
-    expect(node.getAttribute('data-tip')).toBe('two');
-    a.destroy();
-    node.dispatchEvent(new MouseEvent('mouseenter'));
-    expect(tipEl()?.textContent).not.toBe('two');
   });
 });

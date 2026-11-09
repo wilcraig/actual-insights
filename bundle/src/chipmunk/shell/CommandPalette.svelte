@@ -3,7 +3,7 @@
   import { getReportList, getAccounts, suggest } from '../chipmunk-api';
   import { saveReportChoice, emptyFilter, applySuggestion, suggestionRows } from '../logic';
   import { SCREENS, INSIGHTS_TABS, paletteMatch } from './routes';
-  import { setTxHandoff } from './handoff';
+  import { setTxHandoff, setReportHandoff } from './handoff';
 
   // Cmd/Ctrl-K: jump to any screen, report, account or payee/category, search
   // transactions, or leave for Actual. Lists load once, when first opened.
@@ -29,7 +29,7 @@
   const items = $derived.by(() => {
     const q = query.trim();
     const dyn = [
-      ...reports.map((r) => ({ label: `Report: ${r.title}`, group: 'Reports', run: () => { try { saveReportChoice(window.localStorage, r.id); } catch {} go('reports', undefined, true); } })),
+      ...reports.map((r) => ({ label: `Report: ${r.title}`, group: 'Reports', run: () => { try { saveReportChoice(window.localStorage, r.id); } catch {} setReportHandoff(r.id); go('reports', undefined, true); } })),
       ...accounts.map((a) => ({ label: `Transactions in ${a.name}`, group: 'Accounts', run: () => { setTxHandoff({ account: a.id }); go('transactions', undefined, true); } })),
       ...found.map((row) => ({ label: `${row.kind === 'category' ? 'Category' : 'Payee'}: ${row.name}`, group: 'Transactions', run: () => { setTxHandoff({ filter: applySuggestion(emptyFilter(), row) }); go('transactions', undefined, true); } })),
     ];
@@ -103,7 +103,7 @@
 </div>
 
 <style>
-  .cm-pal-scrim { position: absolute; inset: 0; z-index: 10; background: rgba(0, 0, 0, 0.45); display: flex; justify-content: center; align-items: flex-start; padding: 12vh 12px 0; }
+  .cm-pal-scrim { pointer-events: auto; position: absolute; inset: 0; z-index: 10; background: rgba(0, 0, 0, 0.45); display: flex; justify-content: center; align-items: flex-start; padding: 12vh 12px 0; }
   .cm-pal { width: min(620px, 100%); max-height: 70vh; display: flex; flex-direction: column; border-radius: 14px; overflow: hidden; background: var(--cm-bg, Canvas); color: var(--cm-fg, CanvasText); border: 1px solid var(--cm-line, rgba(128, 128, 128, 0.3)); box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45); }
   .cm-pal-input { border: 0; border-bottom: 1px solid var(--cm-line, rgba(128, 128, 128, 0.3)); padding: 14px 16px; font: inherit; font-size: 16px; background: transparent; color: inherit; outline: none; }
   .cm-pal-list { list-style: none; margin: 0; padding: 6px; overflow-y: auto; }

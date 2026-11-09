@@ -1,6 +1,6 @@
 <script>
-  import { onMount } from 'svelte';
-  import ReportsTab from '../ReportsTab.svelte';
+  import { onMount, setContext } from 'svelte';
+  import ReportsScreen from './ReportsScreen.svelte';
   import AccountsTab from '../AccountsTab.svelte';
   import TransactionsTab from '../TransactionsTab.svelte';
   import BudgetTab from '../BudgetTab.svelte';
@@ -14,9 +14,10 @@
   // screens) with the phone app's four screens, Settings, More Insights (the
   // existing Insights page, unchanged) and Open Actual. Each screen is the
   // component the Insights tabs used before; the shell only adds the frame.
-  let { openActual, win = window, visible = true } = $props();
+  let { openActual, actual = null, host = null, win = window, visible = true } = $props();
+  setContext('cm-actual', actual);
 
-  const SCREEN_COMPONENTS = { reports: ReportsTab, accounts: AccountsTab, transactions: TransactionsTab, budget: BudgetTab, settings: SettingsScreen };
+  const SCREEN_COMPONENTS = { reports: ReportsScreen, accounts: AccountsTab, transactions: TransactionsTab, budget: BudgetTab, settings: SettingsScreen };
   const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
   const mod = mac ? '⌘' : 'Ctrl+';
 
@@ -51,8 +52,11 @@
 
   function onKey(event) {
     if (!visible) return;
+    // Handled keys stop here: on the Reports screen Actual is live underneath
+    // and has its own Ctrl/Cmd-K search that must not open as well.
     if (isPaletteKey(event)) {
       event.preventDefault();
+      event.stopPropagation();
       palette = !palette;
       return;
     }
@@ -64,6 +68,7 @@
     const target = shortcutTarget(event);
     if (target) {
       event.preventDefault();
+      event.stopPropagation();
       go(target);
     }
   }
@@ -86,13 +91,24 @@
     };
   });
 
+  // On the Reports screen Actual's own page shows through the shell: the host
+  // sinks below Actual's modals and the widget builder (z-index 100 and up),
+  // stops painting and catching clicks outside the chrome.
+  const reveal = $derived(visible && route.screen === 'reports' && !!actual);
+  $effect(() => {
+    if (!host) return;
+    host.style.zIndex = reveal ? '50' : '2147483000';
+    host.style.pointerEvents = reveal ? 'none' : '';
+    host.style.background = reveal ? 'transparent' : 'Canvas';
+  });
+
   // Re-read the address whenever the shell is shown again (after Open Actual / Back).
   $effect(() => {
     if (visible) sync();
   });
 </script>
 
-<div class="cm-shell" class:cm-drawer-open={drawer} data-chipmunk-shell-root>
+<div class="cm-shell" class:cm-reveal={reveal} class:cm-drawer-open={drawer} data-chipmunk-shell-root>
   <header class="cm-topbar">
     <button type="button" class="cm-hamburger" aria-label="Menu" aria-expanded={drawer} onclick={() => (drawer = !drawer)}>
       <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none" /></svg>
@@ -159,7 +175,7 @@
   {#if palette}<CommandPalette onClose={() => (palette = false)} {go} {openActual} />{/if}
 
   <main class="cm-content" id="chipmunk-main">
-    <div class="cm-column" class:cm-wide={route.screen === 'reports' || route.screen === 'transactions'} class:cm-mid={route.screen === 'accounts' || route.screen === 'budget'}>
+    <div class="cm-column" class:cm-wide={route.screen === 'transactions'} class:cm-mid={route.screen === 'accounts' || route.screen === 'budget'} class:cm-full={route.screen === 'reports'}>
       {#key `${route.screen}/${route.tab ?? ''}/${nonce}`}
         <svelte:boundary>
           {#if route.screen === 'insights'}
@@ -213,6 +229,10 @@
   .cm-column { max-width: 760px; margin: 0 auto; padding: 24px 20px 48px; box-sizing: border-box; }
   .cm-column.cm-mid { max-width: 1040px; }
   .cm-column.cm-wide { max-width: 1760px; }
+  .cm-column.cm-full { max-width: none; padding: 0; height: 100%; box-sizing: border-box; }
+  .cm-reveal { background: transparent; pointer-events: none; }
+  .cm-reveal .cm-content { overflow: hidden; background: transparent; }
+  .cm-reveal .cm-sidebar, .cm-reveal .cm-topbar, .cm-reveal .cm-scrim { pointer-events: auto; }
   .cm-find { border: 1px solid var(--cm-line); margin-bottom: 8px; opacity: 0.85; }
   .cm-crash { border: 1px solid #dc2626; border-radius: 10px; padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .cm-crash p { flex-basis: 100%; margin: 0; }
@@ -227,6 +247,7 @@
     .cm-drawer-open .cm-sidebar { transform: none; visibility: visible; transition: transform 0.2s ease, visibility 0s; box-shadow: 0 0 40px rgba(0, 0, 0, 0.4); }
     .cm-scrim { display: block; position: absolute; inset: 0; z-index: 2; border: 0; background: rgba(0, 0, 0, 0.4); cursor: default; }
     .cm-hint { display: none; }
+    .cm-column.cm-full { padding: 0; }
     .cm-column, .cm-column.cm-wide, .cm-column.cm-mid { padding: 16px 14px calc(env(safe-area-inset-bottom, 0px) + 40px); }
   }
   @media (prefers-reduced-motion: reduce) { .cm-sidebar { transition: none; } }

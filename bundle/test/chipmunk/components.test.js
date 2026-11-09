@@ -6,7 +6,6 @@ vi.mock('../../src/chipmunk/chipmunk-api', async (orig) => ({
 import * as api from '../../src/chipmunk/chipmunk-api';
 import { setChipmunkMode } from '../../src/chipmunk/mode-state';
 import ChipmunkModeRow from '../../src/chipmunk/ChipmunkModeRow.svelte';
-import ReportsTab from '../../src/chipmunk/ReportsTab.svelte';
 import AccountsTab from '../../src/chipmunk/AccountsTab.svelte';
 import TransactionsTab from '../../src/chipmunk/TransactionsTab.svelte';
 import BudgetTab from '../../src/chipmunk/BudgetTab.svelte';
@@ -103,76 +102,6 @@ describe('InsightsPage tabs', () => {
     setChipmunkMode({ enabled: true, entitled: true });
     const h = await mount(InsightsPage, { tabId: 'general' });
     expect([...h.querySelectorAll('[role=tab]')].map((t) => t.textContent.trim())).toEqual(['General', 'Summaries', 'Channels', 'Forecast', 'Mobile app']);
-  });
-});
-
-describe('ReportsTab', () => {
-  const list = { reports: [{ id: 'p1', title: 'Main' }, { id: 'p2', title: 'Other' }], defaultId: 'p1' };
-  const donut = (month, value) => ({ id: 'c1', kind: 'breakdown', title: 'Spending', format: 'money', chart: 'donut', total: value, items: [{ label: 'Food', value }], monthNav: { month, earliest: '2020-01' } });
-
-  test('title dropdown lists reports, default first, and the pick is remembered', async () => {
-    api.getReportList.mockResolvedValue(list);
-    api.getReports.mockResolvedValue({ cards: [{ id: 's', kind: 'stat', title: 'Income', value: 12345, format: 'money' }] });
-    const h = await mount(ReportsTab);
-    const sel = h.querySelector('select');
-    expect([...sel.options].map((o) => o.text)).toEqual(['Main', 'Other']);
-    expect(api.getReports).toHaveBeenLastCalledWith({ report: 'p1' });
-    expect(h.textContent).toContain('$123.45');
-    sel.value = 'p2';
-    sel.dispatchEvent(new Event('change', { bubbles: true }));
-    await flush();
-    expect(api.getReports).toHaveBeenLastCalledWith({ report: 'p2' });
-    expect(localStorage.getItem('insights:chipmunk:report')).toBe('p2');
-  });
-
-  test('a remembered report that still exists is used', async () => {
-    localStorage.setItem('insights:chipmunk:report', 'p2');
-    api.getReportList.mockResolvedValue(list);
-    api.getReports.mockResolvedValue({ cards: [] });
-    const h = await mount(ReportsTab);
-    expect(api.getReports).toHaveBeenLastCalledWith({ report: 'p2' });
-    expect(h.textContent).toContain('No reports yet');
-  });
-
-  test('month arrows load that month for the card, and a failure is shown on it', async () => {
-    const now = new Date();
-    const cur = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const prev = `${now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear()}-${String(now.getMonth() === 0 ? 12 : now.getMonth()).padStart(2, '0')}`;
-    api.getReportList.mockResolvedValue(list);
-    api.getReports.mockImplementation(async ({ month } = {}) => ({ cards: [donut(month ?? cur, month ? 111 : 999)] }));
-    const h = await mount(ReportsTab);
-    expect(h.querySelector('.next').disabled).toBe(true);
-    await click(h.querySelector('.prev'));
-    expect(api.getReports).toHaveBeenLastCalledWith({ report: 'p1', month: prev });
-    expect(h.querySelector('.donut text').textContent).toBe('$1.11');
-    api.getReports.mockRejectedValue(new Error('nope'));
-    await click(h.querySelector('.prev'));
-    expect(h.querySelector('.err').textContent).toBe('nope');
-  });
-
-  test('every card kind renders without throwing, unknown ones with a placeholder', async () => {
-    api.getReportList.mockResolvedValue(list);
-    api.getReports.mockResolvedValue({ cards: [
-      { id: '1', kind: 'text', title: 'T', text: 'hello' },
-      { id: '2', kind: 'series', title: 'S', format: 'money', chart: 'bar', points: [{ label: 'Jun', value: 5 }, { label: 'Jul', value: -2 }] },
-      { id: '3', kind: 'progress', title: 'P', format: 'money', items: [{ label: 'Groceries', current: 5, target: 10 }] },
-      { id: '4', kind: 'list', title: 'L', rows: [{ title: 'Bill', date: '2026-11-13', value: -100 }] },
-      { id: '5', kind: 'gauge', title: 'G', value: 20, min: 0, max: 100, format: 'percent' },
-      { id: '6', kind: 'table', title: 'Tb', format: 'money', columns: ['A'], rows: [{ label: 'r', values: [1] }] },
-      { id: '7', kind: 'calendar', title: 'C', days: [{ date: '2026-11-01', value: 100 }] },
-      { id: '8', kind: 'multiseries', title: 'M', chart: 'line', format: 'money', labels: ['a'], series: [{ name: 'x', values: [null, 5] }] },
-      { id: '9', kind: 'sankey', title: 'Sk', format: 'money', nodes: [], links: [] },
-      { id: '10', kind: 'unsupported', title: 'U' },
-    ] });
-    const h = await mount(ReportsTab);
-    expect(h.querySelectorAll('section.card')).toHaveLength(10);
-    expect(h.textContent).toContain('hello');
-    expect(h.querySelector('[data-kind=unsupported]').textContent).toContain("Reports page");
-  });
-
-  test('a failing list shows the error', async () => {
-    api.getReportList.mockRejectedValue(new Error('down'));
-    expect((await mount(ReportsTab)).querySelector('.err').textContent).toBe('down');
   });
 });
 

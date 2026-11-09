@@ -4,7 +4,7 @@ import ChipmunkShell from './ChipmunkShell.svelte';
 // Actual draws. The host stays in the page (hidden, not destroyed) while the
 // person is in Actual via Open Actual, so screens keep their state and come
 // back instantly.
-export function mountChipmunkShell(doc, win, { openActual }) {
+export function mountChipmunkShell(doc, win, { openActual, actual }) {
   const host = doc.createElement('div');
   host.setAttribute('data-chipmunk-owned', 'shell');
   host.setAttribute('data-chipmunk-shell', '1');
@@ -15,7 +15,7 @@ export function mountChipmunkShell(doc, win, { openActual }) {
 
   let app;
   try {
-    app = new ChipmunkShell({ target: host, props: { openActual, win, visible: true } });
+    app = new ChipmunkShell({ target: host, props: { openActual, actual, host, win, visible: true } });
   } catch (err) {
     host.remove();
     throw err;

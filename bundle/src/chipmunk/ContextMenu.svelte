@@ -68,7 +68,7 @@
 </div>
 
 <style>
-  .cm-ctx { position: fixed; z-index: 2147483300; min-width: 200px; padding: 5px; border-radius: 10px; background: var(--cm-bg, Canvas); color: var(--cm-fg, CanvasText); border: 1px solid var(--cm-line, rgba(128, 128, 128, 0.35)); box-shadow: 0 10px 34px rgba(0, 0, 0, 0.4); display: flex; flex-direction: column; }
+  .cm-ctx { pointer-events: auto; position: fixed; z-index: 2147483300; min-width: 200px; padding: 5px; border-radius: 10px; background: var(--cm-bg, Canvas); color: var(--cm-fg, CanvasText); border: 1px solid var(--cm-line, rgba(128, 128, 128, 0.35)); box-shadow: 0 10px 34px rgba(0, 0, 0, 0.4); display: flex; flex-direction: column; }
   button { border: 0; background: transparent; color: inherit; font: 14px/1.3 system-ui, sans-serif; text-align: left; padding: 7px 10px; border-radius: 6px; cursor: pointer; }
   button:hover:not([disabled]), button:focus-visible { background: color-mix(in srgb, currentColor 12%, transparent); outline: none; }
   button[disabled] { opacity: 0.4; cursor: default; }
