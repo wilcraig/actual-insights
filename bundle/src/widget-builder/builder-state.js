@@ -28,7 +28,7 @@ export function defaultValues(widget) {
   const values = {};
   for (const field of widget?.fields ?? []) {
     if (isPickerField(field)) values[field.key] = [];
-    else if (field.type === 'checkbox') values[field.key] = false;
+    else if (field.type === 'checkbox') values[field.key] = field.default === true;
     // A select starts on its first option, so a single-choice field never
     // blocks the form the way an empty multiselect does.
     else if (field.type === 'select') values[field.key] = field.options[0]?.value ?? '';

@@ -107,3 +107,26 @@ describe('locating and saving the dashboard widget', () => {
     await expect(saveWidgetText({ send: async () => ({ error: { type: 'x' } }), widget: { id: 'w', meta: { content: raw } }, raw, newText: 'y' })).rejects.toThrow();
   });
 });
+
+describe('spending-breakdown-donut edit round trip', () => {
+  const donut = widget('spending-breakdown-donut');
+
+  test('a legacy array, an object without the key, and monthNav:true all read as checked', () => {
+    for (const body of [[], ['g1'], {}, { groupIds: [] }, { groupIds: [], monthNav: true }, null]) {
+      expect(valuesFromBody(donut, body).values).toEqual({ monthNav: true });
+    }
+  });
+
+  test('monthNav:false reads as unchecked', () => {
+    expect(valuesFromBody(donut, { groupIds: [], monthNav: false }).values).toEqual({ monthNav: false });
+  });
+
+  test('values -> placeholder -> parse -> values round-trips for both states', () => {
+    for (const monthNav of [true, false]) {
+      const text = placeholderFor(donut, { monthNav });
+      const parsed = parsePlaceholderText(text);
+      expect(parsed.widgetId).toBe('spending-breakdown-donut');
+      expect(valuesFromBody(donut, parsed.body).values).toEqual({ monthNav });
+    }
+  });
+});

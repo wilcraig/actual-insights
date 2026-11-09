@@ -1,4 +1,5 @@
 const express = require('express');
+const { q } = require('@actual-app/api');
 
 const { getActualClient, syncIfDue } = require('../actual-client');
 const { dateRange } = require('../aql-date-range');
@@ -31,6 +32,30 @@ function parseIdList(raw) {
     .split(',')
     .map((id) => id.trim())
     .filter(Boolean);
+}
+
+// The first month (YYYY-MM) with any transaction in the endpoint's usual
+// transaction scope (non-deleted, non-transfer), never later than `month`, so
+// the web widget's month arrows know how far back they may go. One
+// limit-1 ordered query; any failure just omits the field (the client then
+// falls back to a fixed look-back window).
+async function earliestMonthFor(client, month) {
+  try {
+    const { monthEnd } = monthBounds(month);
+    const result = await client.aqlQuery(
+      q('transactions')
+        .filter(baseFilterFor({ date: { $lte: monthEnd } }))
+        .orderBy('date')
+        .select('date')
+        .limit(1)
+    );
+    const first = result && Array.isArray(result.data) ? result.data[0] : null;
+    const earliest = first && typeof first.date === 'string' ? first.date.slice(0, 7) : null;
+    if (!earliest || !MONTH_PATTERN.test(earliest)) return null;
+    return earliest < month ? earliest : month;
+  } catch (err) {
+    return null;
+  }
 }
 
 const router = express.Router();
@@ -106,7 +131,8 @@ router.get('/', async (req, res, next) => {
         categoryId,
         payeeId === NO_PAYEE_SENTINEL ? null : payeeId
       );
-      res.status(200).json({ transactions });
+      const earliestMonth = hasMonth ? await earliestMonthFor(client, month) : null;
+      res.status(200).json(earliestMonth ? { transactions, earliestMonth } : { transactions });
       return;
     }
 
@@ -123,7 +149,8 @@ router.get('/', async (req, res, next) => {
 
     const total = slices.reduce((sum, slice) => sum + slice.amountCents, 0);
 
-    res.status(200).json({ total, slices });
+    const earliestMonth = hasMonth ? await earliestMonthFor(client, month) : null;
+    res.status(200).json(earliestMonth ? { total, slices, earliestMonth } : { total, slices });
   } catch (err) {
     next(err);
   }

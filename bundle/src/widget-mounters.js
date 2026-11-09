@@ -13,6 +13,7 @@ import AccountBalancesChart from './widgets/AccountBalancesChart.svelte';
 import AccountBalanceList from './widgets/AccountBalanceList.svelte';
 import UnlinkedTransfers from './widgets/UnlinkedTransfers.svelte';
 import SpendingBreakdownDonut from './widgets/SpendingBreakdownDonut.svelte';
+import { parseDonutConfig } from './widgets/breakdown-nav';
 import SavingsGoalsThermometers from './widgets/SavingsGoalsThermometers.svelte';
 import BurnRateChart from './widgets/BurnRateChart.svelte';
 import SpendingHeatmap from './widgets/SpendingHeatmap.svelte';
@@ -85,14 +86,23 @@ export const WIDGET_MOUNTERS = {
   //   {{INSIGHTS:unlinked-transfers:null}}
   'unlinked-transfers': (host) => new UnlinkedTransfers({ target: host }),
 
-  // SpendingBreakdownDonut's config is an array of category-group ids to show
-  // (empty or omitted means every expense group), the same convention as
-  // account-balances' accountIds. To show every group, type the following
-  // literal text into an Actual Reports "Text widget":
+  // SpendingBreakdownDonut's config is either a bare array of category-group
+  // ids to show (empty or omitted means every expense group, the same
+  // convention as account-balances' accountIds), or an object
+  // {"groupIds": [...], "monthNav": true|false}. Previous/next month arrows
+  // are ON by default (the array form and a missing monthNav key mean ON);
+  // "monthNav": false hides them and pins the donut to the current month.
+  // To show every group, type the following literal text into an Actual
+  // Reports "Text widget":
   //   {{INSIGHTS:spending-breakdown-donut:[]}}
   // or to show only specific groups:
   //   {{INSIGHTS:spending-breakdown-donut:["groupId1","groupId2"]}}
-  'spending-breakdown-donut': (host, groupIds) => new SpendingBreakdownDonut({ target: host, props: { groupIds } }),
+  // or, without the month arrows:
+  //   {{INSIGHTS:spending-breakdown-donut:{"groupIds":[],"monthNav":false}}}
+  'spending-breakdown-donut': (host, config) => {
+    const { groupIds, monthNav } = parseDonutConfig(config);
+    return new SpendingBreakdownDonut({ target: host, props: { groupIds, monthNav } });
+  },
 
   // SavingsGoalsThermometers' config is a bare array of category ids to show
   // (empty or omitted means every goal-tracked category), same convention as

@@ -48,3 +48,24 @@ test('a single-field widget\'s body is the bare value, even when that value is a
   expect(configFor(gauge, { investmentGroupIds: [] })).toEqual({ body: [] });
   expect(placeholderFor(gauge, { investmentGroupIds: ['g1'] })).toBe('{{INSIGHTS:savings-rate-gauge:["g1"]}}');
 });
+
+describe('spending-breakdown-donut Month arrows', () => {
+  const donut = widget('spending-breakdown-donut');
+
+  test('the checkbox starts checked via the field default; other checkboxes stay off', () => {
+    expect(defaultValues(donut)).toEqual({ monthNav: true });
+    expect(defaultValues(widget('account-balance-list')).showTotal).toBe(false);
+  });
+
+  test('checked emits the legacy-compatible [], unchecked the object form', () => {
+    expect(placeholderFor(donut, { monthNav: true })).toBe('{{INSIGHTS:spending-breakdown-donut:[]}}');
+    expect(configFor(donut, { monthNav: true })).toEqual({ body: [] });
+    expect(placeholderFor(donut, { monthNav: false })).toBe('{{INSIGHTS:spending-breakdown-donut:{"groupIds":[],"monthNav":false}}}');
+    expect(configFor(donut, { monthNav: false })).toEqual({ body: { groupIds: [], monthNav: false } });
+  });
+
+  test('never blocks generation', () => {
+    expect(isComplete(donut, { monthNav: false })).toBe(true);
+    expect(isComplete(donut, defaultValues(donut))).toBe(true);
+  });
+});

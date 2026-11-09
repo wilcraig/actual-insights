@@ -138,3 +138,129 @@ test('renders the inline error treatment when fetch throws', async () => {
 
   expect(target.textContent).toContain('could not reach insights-api');
 });
+
+// ---- month arrows ----
+
+const tick = async (n = 3) => {
+  for (let i = 0; i < n; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+};
+const monthOf = (call) => new URLSearchParams(call[0].split('?')[1]).get('month');
+const click = (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+describe('month arrows', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(2026, 10, 8));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const groups = (extra = {}) => jsonResponse({ total: 500, slices: [{ id: 'g1', label: 'Food', amountCents: 500 }], ...extra });
+
+  test('header shows the month, next is disabled at the current month, labels are accessible', async () => {
+    fetchApi.mockResolvedValue(groups({ earliestMonth: '2026-09' }));
+    const target = mountWidget();
+    await tick();
+
+    expect(target.querySelector('.month-label').textContent).toBe('November 2026');
+    expect(target.querySelector('.month-label').getAttribute('aria-live')).toBe('polite');
+    const prev = target.querySelector('button.month-prev');
+    const next = target.querySelector('button.month-next');
+    expect(prev.getAttribute('aria-label')).toBe('Previous month, October 2026');
+    expect(next.getAttribute('aria-label')).toBe('Next month, December 2026');
+    expect(prev.disabled).toBe(false);
+    expect(next.disabled).toBe(true);
+  });
+
+  test('stepping back re-fetches the same drill state for the earlier month, and stops at earliestMonth', async () => {
+    fetchApi.mockResolvedValue(groups({ earliestMonth: '2026-09' }));
+    const target = mountWidget();
+    await tick();
+
+    // drill into the Food group first
+    click(target.querySelector('path.donut-slice'));
+    await tick();
+    expect(fetchApi.mock.calls[1][0]).toContain('level=categories');
+    expect(monthOf(fetchApi.mock.calls[1])).toBe('2026-11');
+
+    click(target.querySelector('button.month-prev'));
+    await tick();
+    const last = fetchApi.mock.calls.at(-1);
+    expect(monthOf(last)).toBe('2026-10');
+    expect(last[0]).toContain('level=categories');
+    expect(last[0]).toContain('groupId=g1');
+    expect(target.querySelector('.month-label').textContent).toBe('October 2026');
+
+    click(target.querySelector('button.month-prev'));
+    await tick();
+    expect(target.querySelector('.month-label').textContent).toBe('September 2026');
+    expect(target.querySelector('button.month-prev').disabled).toBe(true);
+    expect(target.querySelector('button.month-next').disabled).toBe(false);
+
+    // Back keeps the shown month
+    click(target.querySelector('button.breakdown-back'));
+    await tick();
+    expect(monthOf(fetchApi.mock.calls.at(-1))).toBe('2026-09');
+    expect(fetchApi.mock.calls.at(-1)[0]).toContain('level=groups');
+  });
+
+  test('without earliestMonth, allows 24 months back and no further', async () => {
+    fetchApi.mockResolvedValue(groups());
+    const target = mountWidget();
+    await tick();
+    for (let i = 0; i < 30; i++) {
+      const prev = target.querySelector('button.month-prev');
+      if (prev.disabled) break;
+      click(prev);
+      await tick(2);
+    }
+    expect(target.querySelector('.month-label').textContent).toBe('November 2024');
+  });
+
+  test('an empty month shows a note and the arrows keep working', async () => {
+    fetchApi
+      .mockResolvedValueOnce(groups({ earliestMonth: '2026-01' }))
+      .mockResolvedValueOnce(jsonResponse({ total: 0, slices: [], earliestMonth: '2026-01' }));
+    const target = mountWidget();
+    await tick();
+    click(target.querySelector('button.month-prev'));
+    await tick();
+
+    expect(target.textContent).toContain('No spending in October 2026');
+    expect(target.querySelector('.donut-slice')).toBeNull();
+    expect(target.querySelector('button.month-prev').disabled).toBe(false);
+    expect(target.querySelector('button.month-next').disabled).toBe(false);
+  });
+
+  test('a slow earlier response never overwrites a newer month', async () => {
+    let resolveSlow;
+    fetchApi
+      .mockResolvedValueOnce(groups({ earliestMonth: '2026-01' }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveSlow = resolve; }))
+      .mockResolvedValueOnce(jsonResponse({ total: 700, slices: [{ id: 'g2', label: 'Housing', amountCents: 700 }] }));
+    const target = mountWidget();
+    await tick();
+
+    click(target.querySelector('button.month-prev')); // October (slow)
+    await tick(1);
+    click(target.querySelector('button.month-prev')); // September (fast)
+    await tick();
+    resolveSlow(jsonResponse({ total: 1, slices: [{ id: 'g3', label: 'Stale', amountCents: 1 }] }));
+    await tick();
+
+    const labels = [...target.querySelectorAll('.donut-slice')].map((s) => s.getAttribute('aria-label')).join('|');
+    expect(labels).toContain('Housing');
+    expect(labels).not.toContain('Stale');
+  });
+
+  test('monthNav=false and the date prop show no arrows', async () => {
+    fetchApi.mockResolvedValue(groups());
+    const off = mountWidget({ monthNav: false });
+    await tick();
+    expect(off.querySelector('.breakdown-month-nav')).toBeNull();
+    expect(monthOf(fetchApi.mock.calls[0])).toBe('2026-11');
+
+    const dated = mountWidget({ date: '2026-10-15' });
+    await tick();
+    expect(dated.querySelector('.breakdown-month-nav')).toBeNull();
+  });
+});

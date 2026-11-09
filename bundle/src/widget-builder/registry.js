@@ -1,4 +1,4 @@
-import { pacingBody } from './placeholder';
+import { pacingBody, donutBody } from './placeholder';
 
 // Widget types the widget-builder panel can configure. Only widgets with a
 // mount.js consumer belong here; add an entry in the PR that implements the widget.
@@ -95,7 +95,12 @@ export const WIDGET_REGISTRY = [
   {
     id: 'spending-breakdown-donut',
     label: 'Spending breakdown donut',
-    fields: [],
+    fields: [
+      // Ticked by default; an unticked box writes {"groupIds":[],"monthNav":false}.
+      { key: 'monthNav', type: 'checkbox', label: 'Month arrows', default: true, help: 'Previous/next month arrows above the donut.' },
+    ],
+    // Legacy-compatible [] while ticked (see donutBody).
+    toBody: donutBody,
   },
   {
     id: 'savings-goals-thermometers',

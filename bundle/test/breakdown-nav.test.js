@@ -156,3 +156,72 @@ describe('buildBreakdownParams', () => {
     expect(params.get('payeeId')).toBe('__none__');
   });
 });
+
+import {
+  shiftMonth,
+  stepMonth,
+  clampMonth,
+  earliestAllowedMonth,
+  canStepBack,
+  canStepForward,
+  monthLabel,
+  parseDonutConfig,
+  FALLBACK_MONTHS_BACK,
+} from '../src/widgets/breakdown-nav';
+
+describe('month helpers', () => {
+  test('shiftMonth crosses year boundaries both ways', () => {
+    expect(shiftMonth('2026-01', -1)).toBe('2025-12');
+    expect(shiftMonth('2026-12', 1)).toBe('2027-01');
+    expect(shiftMonth('2026-11', -11)).toBe('2025-12');
+    expect(shiftMonth('2026-11', 0)).toBe('2026-11');
+  });
+
+  test('monthLabel', () => {
+    expect(monthLabel('2026-11')).toBe('November 2026');
+    expect(monthLabel('2025-01')).toBe('January 2025');
+  });
+
+  test('earliestAllowedMonth uses the API value, bounded by current, else falls back 24 months', () => {
+    expect(earliestAllowedMonth('2025-08', '2026-11')).toBe('2025-08');
+    expect(earliestAllowedMonth('2027-01', '2026-11')).toBe('2026-11');
+    expect(earliestAllowedMonth(undefined, '2026-11')).toBe('2024-11');
+    expect(earliestAllowedMonth('garbage', '2026-11')).toBe(shiftMonth('2026-11', -FALLBACK_MONTHS_BACK));
+  });
+
+  test('stepMonth/clampMonth stay within [earliest, current]', () => {
+    expect(stepMonth('2026-11', -1, '2025-01', '2026-11')).toBe('2026-10');
+    expect(stepMonth('2026-11', 1, '2025-01', '2026-11')).toBe('2026-11');
+    expect(stepMonth('2025-01', -1, '2025-01', '2026-11')).toBe('2025-01');
+    expect(clampMonth('2030-01', '2025-01', '2026-11')).toBe('2026-11');
+    expect(clampMonth('2020-01', '2025-01', '2026-11')).toBe('2025-01');
+  });
+
+  test('canStepBack / canStepForward', () => {
+    expect(canStepBack('2025-01', '2025-01')).toBe(false);
+    expect(canStepBack('2025-02', '2025-01')).toBe(true);
+    expect(canStepForward('2026-11', '2026-11')).toBe(false);
+    expect(canStepForward('2026-10', '2026-11')).toBe(true);
+  });
+});
+
+describe('parseDonutConfig', () => {
+  test('legacy array: ids, month arrows on', () => {
+    expect(parseDonutConfig([])).toEqual({ groupIds: [], monthNav: true });
+    expect(parseDonutConfig(['a', 'b'])).toEqual({ groupIds: ['a', 'b'], monthNav: true });
+  });
+
+  test('object form: groupIds and monthNav, missing key means on', () => {
+    expect(parseDonutConfig({ groupIds: ['a'], monthNav: false })).toEqual({ groupIds: ['a'], monthNav: false });
+    expect(parseDonutConfig({ groupIds: ['a'], monthNav: true })).toEqual({ groupIds: ['a'], monthNav: true });
+    expect(parseDonutConfig({ groupIds: ['a'] })).toEqual({ groupIds: ['a'], monthNav: true });
+    expect(parseDonutConfig({ monthNav: false })).toEqual({ groupIds: [], monthNav: false });
+  });
+
+  test('null, junk and non-array groupIds fall back to defaults', () => {
+    expect(parseDonutConfig(null)).toEqual({ groupIds: [], monthNav: true });
+    expect(parseDonutConfig(undefined)).toEqual({ groupIds: [], monthNav: true });
+    expect(parseDonutConfig({ groupIds: 'x', monthNav: 'no' })).toEqual({ groupIds: [], monthNav: true });
+    expect(parseDonutConfig([1, 'a'])).toEqual({ groupIds: ['a'], monthNav: true });
+  });
+});

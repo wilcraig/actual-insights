@@ -1,6 +1,18 @@
 <script>
   import { untrack } from 'svelte';
-  import { initialState, drillInto, zoomOut, currentMonth, buildBreakdownParams } from './breakdown-nav';
+  import {
+    initialState,
+    drillInto,
+    zoomOut,
+    currentMonth,
+    buildBreakdownParams,
+    stepMonth,
+    earliestAllowedMonth,
+    canStepBack,
+    canStepForward,
+    monthLabel,
+    shiftMonth,
+  } from './breakdown-nav';
   import { fetchApi } from '../api-client';
   import CategoryBreakdownDonut from './CategoryBreakdownDonut.svelte';
 
@@ -12,13 +24,20 @@
   // current month. A user-made "Transfers" group is always left out: it
   // holds moves between accounts, not spending (same rule as the treemap,
   // calendar, and Sankey).
-  let { groupIds = [], date = null, showLegend = false } = $props();
+  // `monthNav` (default on) shows previous/next month arrows above the donut;
+  // it is ignored (no arrows) when `date` is set.
+  let { groupIds = [], date = null, showLegend = false, monthNav = true } = $props();
+  const showMonthNav = untrack(() => monthNav && !date);
   const TRANSFER_GROUP = /^transfers?$/i;
 
   // groupIds is only ever read at mount (not reactive to later prop
   // changes, matching CategoryBreakdownModal.svelte's same pattern), hence
   // untrack().
   let nav = $state(untrack(() => initialState({ groupIds })));
+  // The month being shown; the arrows change this while `nav` (the drill
+  // state) stays put, so drilling granularity is kept across months.
+  let month = $state(currentMonth());
+  let earliestMonth = $state(null);
   let breakdown = $state(null);
   let errorMessage = $state(null);
 
@@ -27,13 +46,13 @@
   // navigation before a slower in-flight request resolves.
   let loadSeq = 0;
 
-  async function load(currentNav) {
+  async function load(currentNav, shownMonth) {
     const seq = ++loadSeq;
     errorMessage = null;
     breakdown = null;
 
     try {
-      const params = buildBreakdownParams(currentNav, currentMonth(), date);
+      const params = buildBreakdownParams(currentNav, shownMonth, date);
       const response = await fetchApi(`/api/spending-breakdown?${params}`);
 
       if (seq !== loadSeq) return; // a newer navigation has since started; discard this response
@@ -45,6 +64,7 @@
 
       const data = await response.json();
       if (seq !== loadSeq) return; // a newer navigation started while this response body was parsing
+      if (typeof data.earliestMonth === 'string') earliestMonth = data.earliestMonth;
       if (currentNav.level === 'groups') {
         const slices = data.slices.filter((s) => !TRANSFER_GROUP.test(s.label.trim()));
         breakdown = { ...data, slices, total: slices.reduce((sum, s) => sum + s.amountCents, 0) };
@@ -59,8 +79,17 @@
 
   // Re-fetch on mount and on every navigation-state transition.
   $effect(() => {
-    load(nav);
+    load(nav, month);
   });
+
+  const current = currentMonth();
+  const earliest = $derived(earliestAllowedMonth(earliestMonth, current));
+  const backDisabled = $derived(!canStepBack(month, earliest));
+  const forwardDisabled = $derived(!canStepForward(month, current));
+
+  function handleMonthStep(delta) {
+    month = stepMonth(month, delta, earliest, current);
+  }
 
   function handleSliceClick(sliceId) {
     const slice = breakdown?.slices.find((s) => s.id === sliceId);
@@ -80,6 +109,30 @@
 </script>
 
 <div class="actualmint-spending-breakdown-donut">
+  {#if showMonthNav}
+    <div class="breakdown-month-nav">
+      <button
+        type="button"
+        class="month-arrow month-prev"
+        aria-label={`Previous month, ${monthLabel(shiftMonth(month, -1))}`}
+        disabled={backDisabled}
+        onclick={() => handleMonthStep(-1)}
+      >
+        ‹
+      </button>
+      <span class="month-label" aria-live="polite">{monthLabel(month)}</span>
+      <button
+        type="button"
+        class="month-arrow month-next"
+        aria-label={`Next month, ${monthLabel(shiftMonth(month, 1))}`}
+        disabled={forwardDisabled}
+        onclick={() => handleMonthStep(1)}
+      >
+        ›
+      </button>
+    </div>
+  {/if}
+
   <nav class="breakdown-breadcrumb" aria-label="Breakdown level">
     <button
       type="button"
@@ -141,6 +194,8 @@
         {/each}
       </ul>
     {/if}
+  {:else if showMonthNav && breakdown.slices.length === 0}
+    <p class="breakdown-empty">No spending in {monthLabel(month)}</p>
   {:else}
     <CategoryBreakdownDonut slices={breakdown.slices} total={breakdown.total} onSliceClick={handleSliceClick} {showLegend} />
   {/if}
@@ -155,6 +210,42 @@
     box-sizing: border-box;
     font-family: inherit;
     container-type: inline-size;
+  }
+
+  .breakdown-month-nav {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+  }
+
+  .month-label {
+    font-weight: 600;
+    min-width: 8rem;
+    text-align: center;
+  }
+
+  .month-arrow {
+    background: none;
+    border: 1px solid #ccc;
+    border-radius: 0.375rem;
+    width: 2rem;
+    height: 2rem;
+    font: inherit;
+    font-size: 1.25rem;
+    line-height: 1;
+    color: inherit;
+    cursor: pointer;
+  }
+
+  .month-arrow:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+
+  .month-arrow:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
   }
 
   .breakdown-breadcrumb {

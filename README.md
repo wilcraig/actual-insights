@@ -117,6 +117,14 @@ transactions.
 Pass a list of group ids to limit it to just those groups, for example
 `["groupId1","groupId2"]`.
 
+Previous and next month arrows above the donut step through earlier months
+(back to your first transaction, never into the future) while keeping the
+level you have drilled to. The widget builder's "Month arrows" checkbox turns
+them off. By hand, use the object form:
+`{{INSIGHTS:spending-breakdown-donut:{"groupIds":[],"monthNav":false}}}`
+(`groupIds` is the same list as above; leaving out `monthNav` keeps the
+arrows on).
+
 ### Burn rate
 
 `{{INSIGHTS:burn-rate:null}}`

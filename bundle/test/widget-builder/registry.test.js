@@ -33,7 +33,9 @@ test('registers every widget with a mount.js consumer, and nothing unimplemented
       { key: 'showTotal', type: 'checkbox', label: 'Show total' },
     ] },
     { id: 'unlinked-transfers', label: 'Unlinked transfers (possible double-counted income/expense)', fields: [] },
-    { id: 'spending-breakdown-donut', label: 'Spending breakdown donut', fields: [] },
+    { id: 'spending-breakdown-donut', label: 'Spending breakdown donut', fields: [
+      { key: 'monthNav', type: 'checkbox', label: 'Month arrows', default: true, help: expect.any(String) },
+    ], toBody: expect.any(Function) },
     { id: 'savings-goals-thermometers', label: 'Sinking fund goals (thermometers)', fields: [
       { key: 'categoryIds', type: 'category-multiselect', label: 'Categories' },
     ] },

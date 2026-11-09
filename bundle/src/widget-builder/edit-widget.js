@@ -65,6 +65,12 @@ export function valuesFromBody(widget, body) {
     return { values, groupIds };
   }
 
+  if (widget.id === 'spending-breakdown-donut') {
+    // Legacy bare array or a missing key reads as checked; only monthNav:false is unchecked.
+    values.monthNav = !(object && body.monthNav === false);
+    return { values, groupIds };
+  }
+
   const fields = widget.fields;
   const pick = (field, raw) => {
     if (isPickerField(field)) values[field.key] = strings(raw);

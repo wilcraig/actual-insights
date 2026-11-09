@@ -19,6 +19,14 @@ vi.mock('../src/widgets/PacingBars.svelte', () => ({
     }
   },
 }));
+let lastDonutProps = null;
+vi.mock('../src/widgets/SpendingBreakdownDonut.svelte', () => ({
+  default: class {
+    constructor({ props }) {
+      lastDonutProps = props;
+    }
+  },
+}));
 let lastSpendingHeatmapProps = null;
 let lastRadarProps = null;
 vi.mock('../src/widgets/SubscriptionRadar.svelte', () => ({
@@ -170,4 +178,22 @@ test('subscription-radar mount callback accepts null and the {layout, excludeCat
   expect(lastRadarProps).toEqual({ layout: 'vertical', excludeCategoryIds: ['c1'] });
   callback(document.createElement('div'), { layout: 'weird' });
   expect(lastRadarProps.layout).toBe('horizontal');
+});
+
+test('spending-breakdown-donut mount callback accepts the legacy array and the {groupIds, monthNav} object (arrows default on)', async () => {
+  vi.resetModules();
+  const { mountWidget } = await import('../src/mount');
+  await import('../src/index.js');
+  const [, callback] = mountWidget.mock.calls.find(([prefix]) => prefix === '{{INSIGHTS:spending-breakdown-donut:');
+
+  callback(document.createElement('div'), []);
+  expect(lastDonutProps).toEqual({ groupIds: [], monthNav: true });
+  callback(document.createElement('div'), ['g1']);
+  expect(lastDonutProps).toEqual({ groupIds: ['g1'], monthNav: true });
+  callback(document.createElement('div'), { groupIds: ['g1'] });
+  expect(lastDonutProps).toEqual({ groupIds: ['g1'], monthNav: true });
+  callback(document.createElement('div'), { groupIds: [], monthNav: false });
+  expect(lastDonutProps).toEqual({ groupIds: [], monthNav: false });
+  callback(document.createElement('div'), null);
+  expect(lastDonutProps).toEqual({ groupIds: [], monthNav: true });
 });

@@ -40,3 +40,14 @@ export function pacingBody(values) {
   if (Array.isArray(values.groupIds)) body.groupIds = values.groupIds;
   return body;
 }
+
+/**
+ * Spending breakdown donut: "Month arrows" ticked (the default) with no group
+ * picking is the legacy-compatible `[]`; unticked is
+ * `{ groupIds: [], monthNav: false }`. The builder has no group picker for
+ * this widget, so groupIds is always empty (a hand-edited placeholder's groups
+ * are not preserved by re-saving through the builder).
+ */
+export function donutBody(values) {
+  return values.monthNav === false ? { groupIds: [], monthNav: false } : [];
+}

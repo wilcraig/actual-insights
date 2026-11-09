@@ -327,6 +327,7 @@ test('level=transactions returns individual transaction line items for a (catego
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toEqual({
+      earliestMonth: '2026-11',
       transactions: [
         { id: 't2', date: '2026-11-20', amountCents: 1500, notes: 'weekly groceries', importedPayee: 'Trader Joes' },
         { id: 't1', date: '2026-11-05', amountCents: 2500, notes: null, importedPayee: 'TRADER JOES #123' },
@@ -462,4 +463,70 @@ test('401s with no token', async () => {
     expect(res.status).toBe(401);
     expect(validateToken).not.toHaveBeenCalled();
   });
+});
+
+// A stub whose transactions table answers the earliest-month query (the one
+// with a limit) differently from the aggregation query.
+function stubWithEarliest(earliestResponse) {
+  return stubClient({
+    transactions: (query) => {
+      const serialized = query.serialize();
+      if (serialized.limit === 1) {
+        if (earliestResponse instanceof Error) throw earliestResponse;
+        return earliestResponse;
+      }
+      return [{ groupId: 'group1', amountCents: -1200 }];
+    },
+    category_groups: [{ id: 'group1', name: 'Food', is_income: false }],
+  });
+}
+
+test('month requests include earliestMonth, from one limit-1 ordered query in the same transaction scope', async () => {
+  const client = stubWithEarliest([{ date: '2025-08-14' }]);
+  getActualClient.mockResolvedValue(client);
+
+  await withServer(async (base) => {
+    const res = await fetch(`${base}/api/spending-breakdown?month=2026-11&level=groups`, { headers: AUTH_HEADERS });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.earliestMonth).toBe('2025-08');
+    expect(body.total).toBe(1200);
+    expect(Object.keys(body).sort()).toEqual(['earliestMonth', 'slices', 'total']);
+
+    const earliestCall = client.aqlQuery.mock.calls.map(([query]) => query.serialize()).find((ser) => ser.limit === 1);
+    expect(earliestCall.filterExpressions).toEqual([{ date: { $lte: '2026-11-30' }, tombstone: false, transfer_id: null }]);
+    expect(earliestCall.orderExpressions).toEqual(['date']);
+  });
+});
+
+test('earliestMonth is never later than the requested month', async () => {
+  getActualClient.mockResolvedValue(stubWithEarliest([{ date: '2026-12-02' }]));
+
+  await withServer(async (base) => {
+    const res = await fetch(`${base}/api/spending-breakdown?month=2026-11&level=groups`, { headers: AUTH_HEADERS });
+    expect((await res.json()).earliestMonth).toBe('2026-11');
+  });
+});
+
+test('earliestMonth is omitted for date requests', async () => {
+  const client = stubWithEarliest([{ date: '2025-08-14' }]);
+  getActualClient.mockResolvedValue(client);
+
+  await withServer(async (base) => {
+    const res = await fetch(`${base}/api/spending-breakdown?date=2026-10-15&level=groups`, { headers: AUTH_HEADERS });
+    const body = await res.json();
+    expect(body).not.toHaveProperty('earliestMonth');
+    expect(client.aqlQuery.mock.calls.every(([query]) => query.serialize().limit !== 1)).toBe(true);
+  });
+});
+
+test('earliestMonth is omitted when its query fails or finds nothing, without failing the request', async () => {
+  for (const earliest of [new Error('boom'), []]) {
+    getActualClient.mockResolvedValue(stubWithEarliest(earliest));
+    await withServer(async (base) => {
+      const res = await fetch(`${base}/api/spending-breakdown?month=2026-11&level=groups`, { headers: AUTH_HEADERS });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ total: 1200, slices: [{ id: 'group1', label: 'Food', amountCents: 1200 }] });
+    });
+  }
 });

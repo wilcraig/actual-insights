@@ -185,3 +185,78 @@ export function drillInto(state, slice) {
   // state.level === 'transactions': leaf level, nothing to drill into.
   return state;
 }
+
+// ---------------------------------------------------------------------------
+// Month stepping (the standalone donut widget's previous/next month arrows).
+// Months are 'YYYY-MM' strings, the same unit as currentMonth() and the API's
+// `month` parameter.
+
+// How far back the arrows may go when the API doesn't report an earliest month.
+export const FALLBACK_MONTHS_BACK = 24;
+
+const MONTH_RE = /^(\d{4})-(\d{2})$/;
+
+function monthIndex(month) {
+  const [, year, mm] = MONTH_RE.exec(month);
+  return Number(year) * 12 + (Number(mm) - 1);
+}
+
+function monthFromIndex(index) {
+  const year = Math.floor(index / 12);
+  return `${String(year).padStart(4, '0')}-${String((index % 12) + 1).padStart(2, '0')}`;
+}
+
+// `month` moved by `delta` months (negative = earlier), crossing years.
+export function shiftMonth(month, delta) {
+  return monthFromIndex(monthIndex(month) + delta);
+}
+
+// The earliest month the arrows may reach: the API's `earliestMonth` when it
+// is a valid month, else FALLBACK_MONTHS_BACK months before `current`. Never
+// later than `current`.
+export function earliestAllowedMonth(earliestMonth, current = currentMonth()) {
+  if (typeof earliestMonth === 'string' && MONTH_RE.test(earliestMonth)) {
+    return earliestMonth < current ? earliestMonth : current;
+  }
+  return shiftMonth(current, -FALLBACK_MONTHS_BACK);
+}
+
+// Clamps `month` into [earliest, current].
+export function clampMonth(month, earliest, current = currentMonth()) {
+  if (month > current) return current;
+  if (month < earliest) return earliest;
+  return month;
+}
+
+// Steps `month` by `delta` (+1/-1), clamped to [earliest, current].
+export function stepMonth(month, delta, earliest, current = currentMonth()) {
+  return clampMonth(shiftMonth(month, delta), earliest, current);
+}
+
+export function canStepBack(month, earliest) {
+  return month > earliest;
+}
+
+export function canStepForward(month, current = currentMonth()) {
+  return month < current;
+}
+
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+// 'November 2026' for '2026-11' (fixed English names, no Intl/timezone dependence).
+export function monthLabel(month) {
+  const [, year, mm] = MONTH_RE.exec(month);
+  return `${MONTH_NAMES[Number(mm) - 1]} ${year}`;
+}
+
+// ---------------------------------------------------------------------------
+// The spending-breakdown-donut placeholder config: either the legacy bare
+// array of group ids, or { groupIds: [...], monthNav: true|false }. Month
+// arrows are ON unless monthNav is explicitly false.
+export function parseDonutConfig(config) {
+  const object = config && typeof config === 'object' && !Array.isArray(config);
+  const rawIds = Array.isArray(config) ? config : object ? config.groupIds : [];
+  const groupIds = Array.isArray(rawIds) ? rawIds.filter((id) => typeof id === 'string') : [];
+  const monthNav = !(object && config.monthNav === false);
+  return { groupIds, monthNav };
+}
