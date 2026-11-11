@@ -95,3 +95,56 @@ test('nextPreset snaps an off-preset value to the next preset after its closest 
 test('PRESETS starts at Actual\'s own default so a user who never touches the control sees no change', () => {
   expect(PRESETS[0].px).toBe(13);
 });
+
+// At a text size above Normal, Actual's modal dialogs (Rules, ...) came out
+// taller than the screen because react-aria's pixel viewport variables get
+// zoomed a second time.
+describe('modal dialogs under zoom', () => {
+  beforeEach(() => {
+    document.head.innerHTML = '';
+    document.documentElement.removeAttribute('style');
+    delete document.__insightsViewportTracking;
+  });
+
+  test('above Normal, the modal viewport variables are divided by the zoom so dialogs fit the screen', () => {
+    applyScale(document, 16);
+    const css = document.getElementById('actualmint-text-scale').textContent;
+    expect(css).toContain('[data-testid$="-modal"]');
+    expect(css).toContain(`--visual-viewport-height: calc(var(--insights-viewport-height) / ${16 / 13}) !important`);
+    expect(css).toContain(`--visual-viewport-width: calc(var(--insights-viewport-width) / ${16 / 13}) !important`);
+  });
+
+  test('at Normal there is no override, so nothing changes for anyone who never touches the control', () => {
+    applyScale(document, 13);
+    expect(document.getElementById('actualmint-text-scale').textContent).not.toContain('visual-viewport');
+    expect(document.documentElement.style.getPropertyValue('--insights-viewport-height')).toBe('');
+  });
+
+  test('going back to Normal from a larger size removes the override', () => {
+    applyScale(document, 19);
+    applyScale(document, 13);
+    expect(document.getElementById('actualmint-text-scale').textContent).not.toContain('visual-viewport');
+  });
+
+  test('the real viewport size is published on <html> and follows window resizes', () => {
+    applyScale(document, 16);
+    const root = document.documentElement.style;
+    expect(root.getPropertyValue('--insights-viewport-height')).toBe(`${window.innerHeight}px`);
+    expect(root.getPropertyValue('--insights-viewport-width')).toBe(`${window.innerWidth}px`);
+
+    const before = window.innerHeight;
+    window.innerHeight = 420;
+    window.dispatchEvent(new Event('resize'));
+    expect(root.getPropertyValue('--insights-viewport-height')).toBe('420px');
+    window.innerHeight = before;
+  });
+
+  test('applying a size repeatedly installs the resize tracking only once', () => {
+    const add = vi.spyOn(window, 'addEventListener');
+    applyScale(document, 16);
+    applyScale(document, 19);
+    applyScale(document, 23);
+    expect(add.mock.calls.filter(([type]) => type === 'resize').length).toBe(1);
+    add.mockRestore();
+  });
+});

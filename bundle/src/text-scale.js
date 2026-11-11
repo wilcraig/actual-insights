@@ -75,7 +75,40 @@ export function applyScale(doc, px) {
     doc.head.appendChild(styleEl);
   }
   const zoom = px / DEFAULT_PX;
-  styleEl.textContent = `html { zoom: ${zoom}; }`;
+  styleEl.textContent = `html { zoom: ${zoom}; }${zoom === 1 ? '' : modalViewportRules(zoom)}`;
+  if (zoom !== 1) trackViewport(doc);
+}
+
+// Actual's modal dialogs (Rules, account and schedule editors, ...) size
+// themselves from `--visual-viewport-height` / `--visual-viewport-width`, which
+// react-aria sets on each dialog's overlay as the visible viewport in pixels.
+// Under `html { zoom }` every pixel is scaled again, so at a text size above
+// Normal the dialog came out `zoom` times taller than the screen and its
+// buttons (Save) landed below the bottom edge. Dividing the two variables by
+// the zoom makes them come out at the real viewport size. They are set inline
+// by react-aria, so the override needs !important; the overlay always carries a
+// `data-testid` ending in "-modal".
+function modalViewportRules(zoom) {
+  return ` [data-testid$="-modal"] { --visual-viewport-height: calc(var(--insights-viewport-height) / ${zoom}) !important; --visual-viewport-width: calc(var(--insights-viewport-width) / ${zoom}) !important; }`;
+}
+
+// Keeps `--insights-viewport-height/-width` on <html> equal to the visible
+// viewport in (unzoomed) pixels, the same measure react-aria uses, updating
+// when the window is resized or the on-screen keyboard changes the visual
+// viewport. Installed once per document.
+const TRACKING_FLAG = '__insightsViewportTracking';
+function trackViewport(doc) {
+  const win = doc.defaultView;
+  if (!win || doc[TRACKING_FLAG]) return;
+  doc[TRACKING_FLAG] = true;
+  const update = () => {
+    const viewport = win.visualViewport;
+    doc.documentElement.style.setProperty('--insights-viewport-height', `${viewport?.height ?? win.innerHeight}px`);
+    doc.documentElement.style.setProperty('--insights-viewport-width', `${viewport?.width ?? win.innerWidth}px`);
+  };
+  update();
+  win.addEventListener('resize', update);
+  win.visualViewport?.addEventListener('resize', update);
 }
 
 // The next preset after whichever one's px is closest to `currentPx`,
