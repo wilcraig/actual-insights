@@ -54,3 +54,24 @@ export const patchTransactions = (ids, changes) => call('/api/chipmunk/transacti
 export const setBudgeted = (month, categoryId, budgeted) =>
   call(`/api/chipmunk/budget/${month}/categories/${encodeURIComponent(categoryId)}`, json('PUT', { budgeted }));
 export const moveBudget = (month, { from, to, amount }) => call(`/api/chipmunk/budget/${month}/move`, json('POST', { from, to, amount }));
+
+// Sync all accounts: Actual's bank sync for every linked account. Slow (up to
+// about a minute server side), so it has its own 130 s client timeout (a
+// ChipmunkApiError with message 'timeout' and status 0).
+export const SYNC_TIMEOUT_MS = 130000;
+export async function syncAccounts() {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, SYNC_TIMEOUT_MS);
+  try {
+    return await call('/api/chipmunk/accounts/sync', { ...json('POST', {}), signal: controller.signal });
+  } catch (err) {
+    if (timedOut) throw new ChipmunkApiError('timeout');
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}

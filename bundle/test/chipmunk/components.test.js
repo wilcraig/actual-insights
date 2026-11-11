@@ -1,7 +1,7 @@
 vi.mock('../../src/chipmunk/chipmunk-api', async (orig) => ({
   ...(await orig()),
   getMode: vi.fn(), setMode: vi.fn(), getReportList: vi.fn(), getReports: vi.fn(), getAccounts: vi.fn(), getTransactions: vi.fn(),
-  suggest: vi.fn(), getBudget: vi.fn(), getSeriesList: vi.fn(), saveSeries: vi.fn(), stopSeries: vi.fn(),
+  suggest: vi.fn(), syncAccounts: vi.fn(), getBudget: vi.fn(), getSeriesList: vi.fn(), saveSeries: vi.fn(), stopSeries: vi.fn(),
 }));
 import * as api from '../../src/chipmunk/chipmunk-api';
 import { setChipmunkMode } from '../../src/chipmunk/mode-state';
@@ -131,6 +131,79 @@ describe('AccountsTab', () => {
     expect((await mount(AccountsTab)).querySelector('.err').textContent).toBe('bad');
     api.getAccounts.mockResolvedValue({ accounts: [], groups: [] });
     expect((await mount(AccountsTab)).textContent).toContain('No open accounts');
+  });
+});
+
+describe('AccountsTab sync button', () => {
+  const resp = { accounts: [{ id: 'a1', name: 'Checking', balance: 100000, onBudget: true, groupId: null }], groups: [] };
+  const syncBtn = (h) => h.querySelector('.sync-btn');
+  const err = (message, status) => Object.assign(new Error(message), { status });
+
+  test('is the first thing on the screen, a real button labelled Sync, with no message yet', async () => {
+    api.getAccounts.mockResolvedValue(resp);
+    const h = await mount(AccountsTab);
+    expect(h.querySelector('.accounts-tab').firstElementChild.classList.contains('sync-bar')).toBe(true);
+    expect(syncBtn(h).tagName).toBe('BUTTON');
+    expect(syncBtn(h).getAttribute('type')).toBe('button');
+    expect(syncBtn(h).textContent.trim()).toBe('Sync');
+    expect(syncBtn(h).disabled).toBe(false);
+    expect(h.querySelector('.sync-msg').textContent).toBe('');
+    expect(h.querySelector('.sync-msg').getAttribute('role')).toBe('status');
+  });
+  test('while running: spinner, Syncing\u2026, disabled and busy, a second click does nothing; then Synced just now and the list reloads', async () => {
+    api.getAccounts.mockResolvedValue(resp);
+    let finish;
+    api.syncAccounts.mockImplementation(() => new Promise((r) => { finish = r; }));
+    const h = await mount(AccountsTab);
+    await click(syncBtn(h));
+    expect(syncBtn(h).disabled).toBe(true);
+    expect(syncBtn(h).getAttribute('aria-busy')).toBe('true');
+    expect(syncBtn(h).textContent).toContain('Syncing\u2026');
+    expect(syncBtn(h).querySelector('.spinner')).not.toBeNull();
+    expect(h.textContent).toContain('Checking');
+    syncBtn(h).click();
+    expect(api.syncAccounts).toHaveBeenCalledTimes(1);
+    api.getAccounts.mockResolvedValue({ accounts: [{ id: 'a1', name: 'Checking', balance: 250000, onBudget: true, groupId: null }], groups: [] });
+    finish({ schema: 1, ok: true, syncedAt: '2026-11-11T16:00:00.000Z' });
+    await flush();
+    expect(syncBtn(h).disabled).toBe(false);
+    expect(syncBtn(h).textContent.trim()).toBe('Sync');
+    expect(syncBtn(h).querySelector('.spinner')).toBeNull();
+    expect(h.querySelector('.sync-msg').textContent).toBe('Synced just now');
+    expect(h.querySelector('.sync-msg').classList.contains('err')).toBe(false);
+    expect(api.getAccounts).toHaveBeenCalledTimes(2);
+    expect(h.textContent).toContain('2,500');
+  });
+  test.each([
+    [502, 'bank_sync_failed', 'Bank sync failed. Check the bank connection in Actual and try again'],
+    [409, 'busy', 'A sync is already running'],
+    [0, 'timeout', 'The sync is taking too long. Check Actual and try again'],
+    [500, 'internal', 'Could not sync. Try again'],
+  ])('a %i (%s) shows a friendly message, re-enables the button and does not reload', async (status, message, text) => {
+    api.getAccounts.mockResolvedValue(resp);
+    api.syncAccounts.mockRejectedValue(err(message, status));
+    const h = await mount(AccountsTab);
+    await click(syncBtn(h));
+    expect(h.querySelector('.sync-msg').textContent).toBe(text);
+    expect(h.querySelector('.sync-msg').classList.contains('err')).toBe(true);
+    expect(h.textContent).not.toContain(message === 'internal' ? 'internal' : 'bank_sync_failed');
+    expect(syncBtn(h).disabled).toBe(false);
+    expect(api.getAccounts).toHaveBeenCalledTimes(1);
+  });
+  test('trying again clears the old message', async () => {
+    api.getAccounts.mockResolvedValue(resp);
+    api.syncAccounts.mockRejectedValueOnce(err('busy', 409));
+    const h = await mount(AccountsTab);
+    await click(syncBtn(h));
+    expect(h.querySelector('.sync-msg').textContent).toBe('A sync is already running');
+    api.syncAccounts.mockResolvedValueOnce({ schema: 1, ok: true });
+    await click(syncBtn(h));
+    expect(h.querySelector('.sync-msg').textContent).toBe('Synced just now');
+  });
+  test('the button stays when the accounts failed to load', async () => {
+    api.getAccounts.mockRejectedValue(new Error('bad'));
+    const h = await mount(AccountsTab);
+    expect(syncBtn(h)).not.toBeNull();
   });
 });
 

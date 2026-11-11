@@ -9,3 +9,5 @@ edit these files here; change them in the Chipmunk repo and copy them over.
 
 Refreshed again on 2026-11-09 for `entitlementRequest` / `entitlementResponse` (subscription proof;
 examples `entitlementRequestGoogle` and `entitlementResponseNone` are variants, see `test/helpers/native-v1.js`).
+
+Refreshed again on 2026-11-11 for `accountsSyncRequest` / `accountsSyncResponse` (POST /accounts/sync).

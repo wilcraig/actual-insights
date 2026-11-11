@@ -10,6 +10,7 @@ const { MAX_LIMIT, DEFAULT_LIMIT, CURSOR_PATTERN, buildCurrency, buildAccounts, 
 const { RANGES, buildAccountDetail, putAccountSettings } = require('../mobile/v1/accounts');
 const { buildColors, putColor, isColorKey } = require('../mobile/v1/colors');
 const { buildSpending } = require('../mobile/v1/spending');
+const { syncAllAccounts, resetSyncState } = require('../mobile/v1/sync-accounts');
 const { updateTransactionFields, splitTransactionLines, removeSplit, setBudgetedAmount, moveBudget, createGroup, createCategory, createAccountGroup, renameAccountGroup, deleteAccountGroup, setAccountGroup } = require('../mobile/v1/write');
 
 // /api/mobile/v1: the native client API (contract: native-v1.schema.json in
@@ -314,7 +315,7 @@ function write(handler) {
     } catch (err) {
       // A write that threw may still have changed something (for example a
       // failure after the data was saved), so the cache goes either way.
-      if (!(err instanceof HttpError)) cache.clear();
+      if (!(err instanceof HttpError) || err.status === 502) cache.clear();
       fail(res, err);
     }
   };
@@ -395,6 +396,13 @@ const putColorRoute = (kind) =>
   });
 router.put('/colors/groups/:id', writeLimit, requireWrite, parseJson, putColorRoute('groups'));
 router.put('/colors/categories/:id', writeLimit, requireWrite, parseJson, putColorRoute('categories'));
+
+// Bank sync for every linked account. Slow (up to ~110 s server side); the body
+// must be exactly {}. 409 busy while one runs, 502 bank_sync_failed on any error.
+router.post('/accounts/sync', writeLimit, requireWrite, parseJson, write((req) => {
+  strictBody(req, []);
+  return () => syncAllAccounts({ tokenId: req.deviceToken.id });
+}));
 
 router.put('/accounts/:id/settings', writeLimit, requireWrite, parseJson, write((req) => {
   const id = pathId(req.params.id);
@@ -482,6 +490,7 @@ router.use((err, req, res, next) => {
 // Test hook: forget the rate-limit windows and the read cache.
 function resetMobileV1State() {
   resetRateLimits();
+  resetSyncState();
   cache.clear();
 }
 

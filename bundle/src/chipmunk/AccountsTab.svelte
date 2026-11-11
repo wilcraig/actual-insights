@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte';
-  import { getAccounts } from './chipmunk-api';
+  import { getAccounts, syncAccounts } from './chipmunk-api';
   import { layoutAccounts, loadExpanded, saveExpanded, balanceTone, formatMoney } from './logic';
 
   // The phone's Accounts page: On budget / Off budget, groups collapsed until
@@ -9,6 +9,33 @@
   let status = $state('loading');
   let errorText = $state('');
   let expanded = $state(new Set());
+  let syncing = $state(false);
+  let syncMessage = $state('');
+  let syncFailed = $state(false);
+
+  function syncErrorText(err) {
+    if (err && err.status === 409) return 'A sync is already running';
+    if (err && err.status === 502) return 'Bank sync failed. Check the bank connection in Actual and try again';
+    if (err && err.message === 'timeout') return 'The sync is taking too long. Check Actual and try again';
+    return 'Could not sync. Try again';
+  }
+
+  async function sync() {
+    if (syncing) return;
+    syncing = true;
+    syncMessage = '';
+    syncFailed = false;
+    try {
+      await syncAccounts();
+      syncMessage = 'Synced just now';
+      await load({ quiet: true });
+    } catch (err) {
+      syncFailed = true;
+      syncMessage = syncErrorText(err);
+    } finally {
+      syncing = false;
+    }
+  }
 
   function storage() {
     try {
@@ -27,8 +54,8 @@
     if (s) saveExpanded(s, next);
   }
 
-  async function load() {
-    status = 'loading';
+  async function load({ quiet = false } = {}) {
+    if (!quiet) status = 'loading';
     try {
       sections = layoutAccounts(await getAccounts());
       status = 'ready';
@@ -46,6 +73,12 @@
 </script>
 
 <div class="accounts-tab">
+  <div class="sync-bar">
+    <button type="button" class="sync-btn" disabled={syncing} aria-busy={syncing ? 'true' : 'false'} onclick={sync}>
+      {#if syncing}<span class="spinner" aria-hidden="true"></span>Syncing&hellip;{:else}Sync{/if}
+    </button>
+    <span class="sync-msg" class:err={syncFailed} role="status" aria-live="polite">{syncMessage}</span>
+  </div>
   {#if status === 'loading'}
     <p class="note">Loading&hellip;</p>
   {:else if status === 'error'}
@@ -82,6 +115,16 @@
 </div>
 
 <style>
+  .sync-bar { display: flex; align-items: center; gap: 12px; margin: 0 0 4px; }
+  .sync-btn { display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 8px; border: 1px solid color-mix(in srgb, currentColor 25%, transparent); background: transparent; color: inherit; font: inherit; font-weight: 600; cursor: pointer; }
+  .sync-btn:hover:not(:disabled) { background: color-mix(in srgb, currentColor 8%, transparent); }
+  .sync-btn:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+  .sync-btn:disabled { opacity: 0.7; cursor: default; }
+  .spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid color-mix(in srgb, currentColor 25%, transparent); border-top-color: currentColor; animation: sync-spin 0.8s linear infinite; }
+  @keyframes sync-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+  .sync-msg { font-size: 13px; opacity: 0.8; }
+  .sync-msg.err { color: #dc2626; opacity: 1; }
   .accounts-tab h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.7; margin: 12px 0 4px; }
   .list { list-style: none; margin: 0; padding: 0; }
   .inner { padding-left: 22px; }

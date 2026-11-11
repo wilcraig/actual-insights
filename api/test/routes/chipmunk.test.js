@@ -346,4 +346,56 @@ describe('/api/chipmunk writes (web)', () => {
       });
     });
   });
+
+  describe('POST /api/chipmunk/accounts/sync', () => {
+    beforeEach(() => { client.runBankSync = jest.fn(async () => {}); });
+    const sync = (base, body = {}) => send(base, 'POST', '/api/chipmunk/accounts/sync', body);
+
+    it('needs the session (401) and the entitlement (403) and runs nothing without them', async () => {
+      await withServer(async (base) => {
+        expect((await fetch(`${base}/api/chipmunk/accounts/sync`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status).toBe(401);
+        chipmunkEntitled.mockResolvedValue({ entitled: false, reason: 'none' });
+        expect((await sync(base)).status).toBe(403);
+        expect(client.runBankSync).not.toHaveBeenCalled();
+      });
+    });
+
+    it('runs the bank sync for all accounts, answers the contract shape and audits as web', async () => {
+      await withServer(async (base) => {
+        const res = await sync(base);
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expectValid('accountsSyncResponse', body);
+        expect(client.runBankSync).toHaveBeenCalledWith();
+        expect(client.sync).toHaveBeenCalled();
+        expect(auditLines().at(-1)).toMatchObject({ tokenId: 'web', op: 'accounts.sync' });
+      });
+    });
+
+    it('rejects a body with anything in it', async () => {
+      await withServer(async (base) => {
+        expect((await sync(base, { a: 1 })).status).toBe(400);
+        expect((await sync(base, [])).status).toBe(400);
+        expect(client.runBankSync).not.toHaveBeenCalled();
+      });
+    });
+
+    it('is 502 bank_sync_failed on a bank error (nothing echoed) and 409 busy while one runs', async () => {
+      await withServer(async (base) => {
+        client.runBankSync.mockRejectedValueOnce(new Error('SECRET detail'));
+        const failed = await sync(base);
+        expect(failed.status).toBe(502);
+        expect(await failed.text()).toBe('{"error":"bank_sync_failed"}');
+        let release;
+        client.runBankSync.mockImplementationOnce(() => new Promise((r) => { release = r; }));
+        const first = sync(base);
+        await new Promise((r) => setTimeout(r, 30));
+        const second = await sync(base);
+        expect(second.status).toBe(409);
+        expect(await second.json()).toEqual({ error: 'busy' });
+        release();
+        expect((await first).status).toBe(200);
+      });
+    });
+  });
 });

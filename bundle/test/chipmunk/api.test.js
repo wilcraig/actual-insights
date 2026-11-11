@@ -66,3 +66,33 @@ test('write calls', async () => {
     ['/api/chipmunk/budget/2026-11/move', 'POST', '{"from":"a","to":"b","amount":100}'],
   ]);
 });
+
+describe('syncAccounts', () => {
+  afterEach(() => vi.useRealTimers());
+  test('POSTs an empty object to the sync route with an abort signal and answers the body', async () => {
+    fetchApi.mockResolvedValue(ok({ schema: 1, ok: true, syncedAt: 'x' }));
+    expect(await api.syncAccounts()).toEqual({ schema: 1, ok: true, syncedAt: 'x' });
+    const [path, options] = fetchApi.mock.calls[0];
+    expect([path, options.method, options.body]).toEqual(['/api/chipmunk/accounts/sync', 'POST', '{}']);
+    expect(options.signal).toBeInstanceOf(AbortSignal);
+  });
+  test('carries the server status (502, 409) on the error', async () => {
+    fetchApi.mockResolvedValue({ ok: false, status: 502, json: async () => ({ error: 'bank_sync_failed' }) });
+    const e = await caught(() => api.syncAccounts());
+    expect([e.status, e.message]).toEqual([502, 'bank_sync_failed']);
+  });
+  test('gives up after 130 s with a timeout error and aborts the request', async () => {
+    vi.useFakeTimers();
+    expect(api.SYNC_TIMEOUT_MS).toBe(130000);
+    fetchApi.mockImplementation((p, o) => new Promise((_, reject) => o.signal.addEventListener('abort', () => reject(new Error('aborted')))));
+    const pending = caught(() => api.syncAccounts());
+    await vi.advanceTimersByTimeAsync(129999);
+    let settled = false;
+    pending.then(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(2);
+    const e = await pending;
+    expect([e.status, e.message]).toEqual([0, 'timeout']);
+  });
+});

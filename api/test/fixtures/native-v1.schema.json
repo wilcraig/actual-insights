@@ -56,7 +56,9 @@
             "bad_request",
             "not_found",
             "conflict",
-            "internal"
+            "internal",
+            "busy",
+            "bank_sync_failed"
           ]
         }
       }
@@ -2891,6 +2893,33 @@
               "type": "null"
             }
           ]
+        }
+      }
+    },
+    "accountsSyncRequest": {
+      "description": "POST /accounts/sync (write scope: importing bank transactions changes budget data). The body must be an empty JSON object. Runs Actual's own bank sync for every linked account and waits for it, which can take up to about a minute. Answers accountsSyncResponse; 409 'busy' if a sync is already running, 502 'bank_sync_failed' if Actual reports a bank error (nothing is echoed), 403 for a read token.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {}
+    },
+    "accountsSyncResponse": {
+      "description": "Response to POST /accounts/sync. syncedAt is when the sync finished. Accounts that are not linked to a bank are ignored, so a budget with none answers ok too.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "ok",
+        "syncedAt"
+      ],
+      "properties": {
+        "schema": {
+          "const": 1
+        },
+        "ok": {
+          "const": true
+        },
+        "syncedAt": {
+          "$ref": "#/definitions/generatedAt"
         }
       }
     }

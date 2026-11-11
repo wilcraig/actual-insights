@@ -7,6 +7,7 @@ const { MONTH_PATTERN, isValidId, monthWithinWindow } = require('../mobile/v1/co
 const { MAX_LIMIT, DEFAULT_LIMIT, CURSOR_PATTERN, buildAccounts, buildTransactions, buildTransactionSuggest, SUGGEST_MAX_LIMIT, SUGGEST_DEFAULT_LIMIT, buildBudgetMonth } = require('../mobile/v1/read');
 const { saveSeries, deleteSeries, buildSeriesList } = require('../mobile/v1/budget-series');
 const { HttpError, ID_PATTERN, MAX_NOTE } = require('../mobile/v1/common');
+const { syncAllAccounts } = require('../mobile/v1/sync-accounts');
 const { MAX_BULK, updateTransactionsBulk, setBudgetedAmount, moveBudget } = require('../mobile/v1/write');
 
 // Web side of Chipmunk mode, behind the normal Actual-session guard. The data
@@ -274,6 +275,12 @@ data.post('/budget/:month/move', sendWrite(async (req) => {
   const { from, to, amount } = plainBody(req, ['from', 'to', 'amount']);
   if (!isValidId(from) || !isValidId(to) || from === to || !isCents(amount, 1, 1000000000000)) throw badReq();
   return moveBudget({ tokenId: 'web', month, from, to, amount });
+}));
+
+// Bank sync for every linked account (slow: up to ~110 s). Body must be {}.
+data.post('/accounts/sync', sendWrite(async (req) => {
+  plainBody(req, []);
+  return syncAllAccounts({ tokenId: 'web' });
 }));
 
 module.exports = { modeRouter: mode, dataRouter: data };
