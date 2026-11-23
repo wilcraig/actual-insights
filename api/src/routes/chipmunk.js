@@ -3,7 +3,7 @@ const express = require('express');
 const { getActualClient, syncIfDue } = require('../actual-client');
 const { chipmunkEntitled, entitlementMode } = require('../chipmunk/entitlement');
 const { readSettings, writeSettings } = require('../chipmunk/settings-store');
-const { MONTH_PATTERN, isValidId, monthWithinWindow } = require('../mobile/v1/common');
+const { MONTH_PATTERN, isValidId, monthWithinWindow, parseTransactionsMonth } = require('../mobile/v1/common');
 const { MAX_LIMIT, DEFAULT_LIMIT, CURSOR_PATTERN, buildAccounts, buildTransactions, buildTransactionSuggest, SUGGEST_MAX_LIMIT, SUGGEST_DEFAULT_LIMIT, buildBudgetMonth } = require('../mobile/v1/read');
 const { saveSeries, deleteSeries, buildSeriesList } = require('../mobile/v1/budget-series');
 const { HttpError, ID_PATTERN, MAX_NOTE } = require('../mobile/v1/common');
@@ -139,11 +139,12 @@ data.get('/accounts', wrap(async (req, client) => {
 }));
 
 data.get('/transactions', wrap(async (req, client) => {
-  only(req, ['account', 'uncategorized', 'group', 'category', 'payees', 'categories', 'q', 'limit', 'cursor', 'showHidden']);
+  only(req, ['account', 'uncategorized', 'group', 'category', 'payees', 'categories', 'q', 'month', 'limit', 'cursor', 'showHidden']);
   const { account, uncategorized, group, category, limit, cursor, showHidden } = req.query;
   for (const id of [account, group, category]) if (id !== undefined && !isValidId(id)) throw bad();
   const payees = idList(req.query.payees);
   const categories = idList(req.query.categories);
+  const month = parseTransactionsMonth(req.query.month);
   let q;
   if (req.query.q !== undefined) {
     q = req.query.q.trim();
@@ -163,6 +164,7 @@ data.get('/transactions', wrap(async (req, client) => {
     payees,
     categories,
     q,
+    month,
     limit: limit === undefined ? DEFAULT_LIMIT : Number(limit),
     cursor,
     showHidden: showHidden === '1',

@@ -5,7 +5,7 @@ const { scopedClient } = require('../mobile/v1/hidden');
 const { touchToken } = require('../mobile-tokens-store');
 const { bearerAuth, rateLimit, resetRateLimits, READ_LIMIT, WRITE_LIMIT } = require('../mobile/http');
 const { createReadCache } = require('../mobile/v1/cache');
-const { MONTH_PATTERN, ID_PATTERN, MAX_NOTE, MAX_MONEY, HttpError, badRequest, notFound, isValidId, monthWithinWindow } = require('../mobile/v1/common');
+const { MONTH_PATTERN, ID_PATTERN, MAX_NOTE, MAX_MONEY, HttpError, badRequest, notFound, isValidId, monthWithinWindow, parseTransactionsMonth } = require('../mobile/v1/common');
 const { MAX_LIMIT, DEFAULT_LIMIT, CURSOR_PATTERN, buildCurrency, buildAccounts, buildTransactions, buildTransactionSuggest, SUGGEST_MAX_LIMIT, SUGGEST_DEFAULT_LIMIT, buildCategories, buildBudgetMonth, buildTransactionDetail } = require('../mobile/v1/read');
 const { RANGES, buildAccountDetail, putAccountSettings } = require('../mobile/v1/accounts');
 const { buildColors, putColor, isColorKey } = require('../mobile/v1/colors');
@@ -131,13 +131,14 @@ const MAX_Q = 100;
 const MAX_ID_LIST = 20;
 
 router.get('/transactions', readLimit, read((req) => {
-  strictQuery(req, ['account', 'uncategorized', 'group', 'category', 'payees', 'categories', 'q', 'limit', 'cursor', 'showHidden']);
+  strictQuery(req, ['account', 'uncategorized', 'group', 'category', 'payees', 'categories', 'q', 'month', 'limit', 'cursor', 'showHidden']);
   const { account, uncategorized, group, category, limit, cursor, showHidden } = req.query;
   if (account !== undefined && !isValidId(account)) throw badRequest();
   if (group !== undefined && !isValidId(group)) throw badRequest();
   if (category !== undefined && !isValidId(category)) throw badRequest();
   const payees = idList(req.query.payees);
   const categories = idList(req.query.categories);
+  const month = parseTransactionsMonth(req.query.month);
   let q;
   if (req.query.q !== undefined) {
     q = req.query.q.trim();
@@ -160,12 +161,13 @@ router.get('/transactions', readLimit, read((req) => {
     payees: payees && [...payees].sort(),
     categories: categories && [...categories].sort(),
     q,
+    month,
     limit: limit === undefined ? DEFAULT_LIMIT : Number(limit),
     cursor,
     showHidden: showHidden === '1',
   };
   // q is free text, so it is JSON-encoded: it can never run into the next field.
-  const key = `transactions|${params.showHidden ? 1 : 0}|${params.account ?? ''}|${params.uncategorized ? 1 : 0}|${params.group ?? ''}|${params.category ?? ''}|${params.limit}|${params.cursor ?? ''}|${params.payees ? params.payees.join(',') : ''}|${params.categories ? params.categories.join(',') : ''}|${q === undefined ? '' : JSON.stringify(q)}`;
+  const key = `transactions|${params.showHidden ? 1 : 0}|${params.account ?? ''}|${params.uncategorized ? 1 : 0}|${params.group ?? ''}|${params.category ?? ''}|${params.limit}|${params.cursor ?? ''}|${params.payees ? params.payees.join(',') : ''}|${params.categories ? params.categories.join(',') : ''}|${q === undefined ? '' : JSON.stringify(q)}|${month ?? ''}`;
   return {
     key,
     build: (client) => {

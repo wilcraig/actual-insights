@@ -136,6 +136,26 @@ describe('/api/chipmunk data routes', () => {
     });
   });
 
+  it('filters transactions by month like the phone API', async () => {
+    const pad = (n) => String(n).padStart(2, '0');
+    const at = (back) => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - back); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; };
+    const month = at(0);
+    const old = at(3);
+    const older = at(4);
+    const row = (id, date, extra = {}) => ({ id, date, account: 'a-chk', payee: 'p-grocer', category: 'c-groc', amount: -100, notes: null, cleared: true, ...extra });
+    client.state.transactions.push(row('w-first', `${month}-01`), row('w-prev', `${older}-28`), row('w-a', `${old}-01`, { payee: 'p-hw', category: 'c-fuel' }), row('w-b', `${old}-28`));
+    await withServer(async (base) => {
+      const past = await (await get(base, `/api/chipmunk/transactions?month=${old}&limit=100`)).json();
+      expectValid('transactionsResponse', past);
+      expect(past.transactions.map((t) => t.id).sort()).toEqual(['w-a', 'w-b']);
+      const both = await (await get(base, `/api/chipmunk/transactions?month=${old}&payees=p-hw&limit=100`)).json();
+      expect(both.transactions.map((t) => t.id)).toEqual(['w-a']);
+      const now = await (await get(base, `/api/chipmunk/transactions?month=${month}&limit=100`)).json();
+      expect(now.transactions.map((t) => t.id)).toContain('w-first');
+      expect(now.transactions.map((t) => t.id)).not.toContain('w-a');
+    });
+  });
+
   it('validates query parameters like the phone API', async () => {
     await withServer(async (base) => {
       for (const url of [
@@ -148,6 +168,10 @@ describe('/api/chipmunk data routes', () => {
         '/api/chipmunk/transactions?q=',
         '/api/chipmunk/transactions?payees=a,b%20c',
         '/api/chipmunk/transactions?cursor=nope',
+        '/api/chipmunk/transactions?month=2026-13',
+        '/api/chipmunk/transactions?month=2999-01',
+        '/api/chipmunk/transactions?month=2026-10&month=2026-09',
+        '/api/chipmunk/transactions?month=',
         '/api/chipmunk/transactions/suggest?limit=99',
         '/api/chipmunk/reports?month=2999-01',
         '/api/chipmunk/reports?report=bad%20id',

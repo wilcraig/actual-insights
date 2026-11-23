@@ -87,7 +87,7 @@ export function layoutAccounts(response) {
 
 // ---- transaction search + filter -----------------------------------------
 
-export const emptyFilter = () => ({ text: '', uncategorized: false, payees: [], categories: [], group: null });
+export const emptyFilter = () => ({ text: '', uncategorized: false, payees: [], categories: [], group: null, month: null });
 
 export function toQuery(filter, { account, cursor, showHidden, limit } = {}) {
   const p = new URLSearchParams();
@@ -95,6 +95,7 @@ export function toQuery(filter, { account, cursor, showHidden, limit } = {}) {
   if (filter.uncategorized) p.set('uncategorized', '1');
   if (filter.group && !filter.uncategorized && filter.categories.length === 0) p.set('group', filter.group.id);
   if (!filter.uncategorized && !filter.group && filter.categories.length) p.set('categories', filter.categories.map((c) => c.id).join(','));
+  if (filter.month) p.set('month', filter.month);
   if (filter.payees.length) p.set('payees', filter.payees.map((x) => x.id).join(','));
   if (filter.text.trim()) p.set('q', filter.text.trim());
   if (limit) p.set('limit', String(limit));
@@ -103,11 +104,16 @@ export function toQuery(filter, { account, cursor, showHidden, limit } = {}) {
   return p.toString();
 }
 
+// 'YYYY-MM' as 'Nov 2026' (fixed English names, no time zone involved).
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+export const monthLabel = (month) => `${MONTH_NAMES[Number(month.slice(5, 7)) - 1] ?? month} ${month.slice(0, 4)}`;
+
 // What is shown as chips under the bar, in a stable order.
 export function chips(filter) {
   const out = [];
   if (filter.text.trim()) out.push({ kind: 'text', label: `“${filter.text.trim()}”` });
   if (filter.uncategorized) out.push({ kind: 'uncategorized', label: 'Uncategorized' });
+  if (filter.month) out.push({ kind: 'month', label: monthLabel(filter.month) });
   if (filter.group) out.push({ kind: 'group', label: filter.group.name });
   for (const c of filter.categories) out.push({ kind: 'category', id: c.id, label: c.name });
   for (const m of filter.payees) out.push({ kind: 'payee', id: m.id, label: m.name });
@@ -118,6 +124,7 @@ export function removeChip(filter, chip) {
   const next = { ...filter, payees: [...filter.payees], categories: [...filter.categories] };
   if (chip.kind === 'text') next.text = '';
   else if (chip.kind === 'uncategorized') next.uncategorized = false;
+  else if (chip.kind === 'month') next.month = null;
   else if (chip.kind === 'group') next.group = null;
   else if (chip.kind === 'category') next.categories = next.categories.filter((c) => c.id !== chip.id);
   else if (chip.kind === 'payee') next.payees = next.payees.filter((m) => m.id !== chip.id);

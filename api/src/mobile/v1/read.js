@@ -180,7 +180,15 @@ function escapeLike(text) {
   return String(text).replace(/[\\%?]/g, (ch) => `\\${ch}`);
 }
 
-function transactionFilters({ account, uncategorized, group, category, payees, categories, q }) {
+// First day of the month after `month` (YYYY-MM), by string arithmetic so no
+// time zone can move it.
+function nextMonthStart(month) {
+  const year = Number(month.slice(0, 4));
+  const m = Number(month.slice(5, 7));
+  return m === 12 ? `${year + 1}-01-01` : `${String(year).padStart(4, '0')}-${String(m + 1).padStart(2, '0')}-01`;
+}
+
+function transactionFilters({ account, uncategorized, group, category, payees, categories, q, month }) {
   const filters = [];
   // Without an account, only open accounts' rows: a closed account can't be
   // edited and is not in /accounts either.
@@ -193,6 +201,9 @@ function transactionFilters({ account, uncategorized, group, category, payees, c
   // Across kinds these AND (each is its own filter); within a list they OR ($oneof).
   if (payees && payees.length) filters.push({ payee: { $oneof: payees } });
   if (categories && categories.length) filters.push({ category: { $oneof: categories } });
+  // One calendar month: [first day, first day of the next). Two clauses, since
+  // AQL applies only the first operator when one field carries two.
+  if (month) filters.push({ $and: [{ date: { $gte: `${month}-01` } }, { date: { $lt: nextMonthStart(month) } }] });
   if (q) {
     const like = { $like: `%${escapeLike(q)}%` };
     filters.push({ $or: [{ 'payee.name': like }, { 'category.name': like }, { notes: like }] });
@@ -209,9 +220,9 @@ async function assertAccountExists(client, accountId) {
   if (!accounts.some((a) => a.id === accountId)) throw notFound();
 }
 
-// params: { account?, uncategorized: boolean, group?, category?, limit, cursor? } (already validated).
+// params: { account?, uncategorized: boolean, group?, category?, month? (YYYY-MM), limit, cursor? } (already validated).
 async function buildTransactions(client, params, now = new Date()) {
-  const { account, uncategorized = false, group, category, payees, categories, q: text, limit = DEFAULT_LIMIT, cursor, showHidden = false } = params;
+  const { account, uncategorized = false, group, category, payees, categories, q: text, month, limit = DEFAULT_LIMIT, cursor, showHidden = false } = params;
   if (account) await assertAccountExists(client, account);
 
   // Flags are read once. The uncategorized view never lists an excluded
@@ -220,7 +231,7 @@ async function buildTransactions(client, params, now = new Date()) {
   const flags = await readFlags();
   const flagged = (pick) => Object.keys(flags).filter((id) => pick(flags[id]));
   const leftOut = notInClause(uncategorized ? flagged((f) => f.excluded) : showHidden ? [] : flagged((f) => f.hidden));
-  const filters = transactionFilters({ account, uncategorized, group, category, payees, categories, q: text });
+  const filters = transactionFilters({ account, uncategorized, group, category, payees, categories, q: text, month });
   if (leftOut) filters.push(leftOut);
   const pageFilters = [...filters];
   if (cursor) {

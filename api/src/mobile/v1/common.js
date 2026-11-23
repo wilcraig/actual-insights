@@ -42,6 +42,15 @@ function monthWithinWindow(month, now = new Date()) {
   return Math.abs(monthIndex(month) - (now.getFullYear() * 12 + now.getMonth())) <= MONTH_WINDOW;
 }
 
+// The optional `month` of GET /transactions: YYYY-MM, inside the usual window,
+// not after the current month. Throws 400 otherwise. Returns the month or undefined.
+function parseTransactionsMonth(month, now = new Date()) {
+  if (month === undefined) return undefined;
+  const current = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  if (typeof month !== 'string' || !MONTH_PATTERN.test(month) || !monthWithinWindow(month, now) || month > current) throw badRequest();
+  return month;
+}
+
 // Hidden group or hidden category: neither is offered to the phone.
 const isHidden = (group, category) => Boolean(group.hidden || (category && category.hidden));
 
@@ -64,6 +73,7 @@ module.exports = {
   isValidId,
   money,
   monthWithinWindow,
+  parseTransactionsMonth,
   isHidden,
   isIncome,
 };

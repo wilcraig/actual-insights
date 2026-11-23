@@ -117,6 +117,7 @@ function makeFakeActual(overrides = {}) {
     const actual = value(row, k);
     if (v !== null && typeof v === 'object') {
       if ('$lt' in v) return actual < v.$lt;
+      if ('$gte' in v) return actual >= v.$gte;
       if ('$ne' in v) return actual !== v.$ne;
       if ('$oneof' in v) return v.$oneof.includes(actual);
       if ('$like' in v) return typeof actual === 'string' && likeRegex(v.$like).test(actual);

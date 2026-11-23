@@ -251,6 +251,124 @@ describe('GET /transactions search and combined filters', () => {
   });
 });
 
+describe('GET /transactions month filter', () => {
+  async function run(url, token) {
+    return withServer(async (base) => get(base, token, url));
+  }
+  const edge = (id, date, extra = {}) => ({ id, date, account: 'a-chk', payee: 'p-grocer', category: 'c-groc', amount: -100, notes: null, cleared: true, ...extra });
+
+  test('month alone keeps only that calendar month', async () => {
+    const { token } = await newToken();
+    const all = ids(await json(await run('/transactions?limit=100', token)));
+    const nov = await json(await run('/transactions?month=2026-11&limit=100', token), 'transactionsResponse');
+    expect(ids(nov)).toEqual(all);
+    expect((await json(await run('/transactions?month=2026-10', token), 'transactionsResponse')).transactions).toEqual([]);
+  });
+
+  test('boundaries: first and last day in, neighbours out, December rolls the year', async () => {
+    const { token } = await newToken();
+    client.state.transactions.push(
+      edge('e-sep30', '2026-09-30'), edge('e-oct01', '2026-10-01'), edge('e-oct31', '2026-10-31'), edge('e-nov01', '2026-11-01'), edge('e-nov30', '2026-11-30'),
+      edge('e-dec31', '2025-12-31'), edge('e-jan01', '2026-01-01'), edge('e-dec01', '2025-12-01'), edge('e-nov30b', '2025-11-30')
+    );
+    const oct = ids(await json(await run('/transactions?month=2026-10&limit=100', token)));
+    expect(oct.sort()).toEqual(['e-oct01', 'e-oct31']);
+    const nov = ids(await json(await run('/transactions?month=2026-11&limit=100', token)));
+    expect(nov).toEqual(expect.arrayContaining(['e-nov01', 'e-nov30', 't-01']));
+    expect(nov).not.toContain('e-oct31');
+    expect(nov).not.toContain('e-jan01');
+    const dec = ids(await json(await run('/transactions?month=2025-12&limit=100', token)));
+    expect(dec.sort()).toEqual(['e-dec01', 'e-dec31']);
+    const jan = ids(await json(await run('/transactions?month=2026-01&limit=100', token)));
+    expect(jan).toEqual(['e-jan01']);
+  });
+
+  test('is not moved by the server time zone', async () => {
+    const { token } = await newToken();
+    client.state.transactions.push(edge('e-oct31', '2026-10-31'), edge('e-nov01', '2026-11-01'));
+    const original = process.env.TZ;
+    try {
+      for (const tz of ['Pacific/Kiritimati', 'Pacific/Pago_Pago', 'UTC']) {
+        process.env.TZ = tz;
+        const oct = ids(await json(await run('/transactions?month=2026-10&limit=100', token)));
+        expect(oct).toEqual(['e-oct31']);
+      }
+    } finally {
+      if (original === undefined) delete process.env.TZ;
+      else process.env.TZ = original;
+    }
+  });
+
+  test('ANDs with category, categories, payees, q, account, group and uncategorized', async () => {
+    const { token } = await newToken();
+    client.state.transactions.push(edge('e-oct-groc', '2026-10-15'), edge('e-oct-fuel', '2026-10-16', { category: 'c-fuel', payee: 'p-hw' }), edge('e-oct-none', '2026-10-17', { category: null, payee: 'p-hw', notes: 'bolts' }));
+    const q = async (qs) => ids(await json(await run(`/transactions?${qs}&limit=100`, token), 'transactionsResponse')).sort();
+    expect(await q('month=2026-10&category=c-groc')).toEqual(['e-oct-groc']);
+    expect(await q('month=2026-10&categories=c-groc,c-fuel')).toEqual(['e-oct-fuel', 'e-oct-groc']);
+    expect(await q('month=2026-10&payees=p-hw')).toEqual(['e-oct-fuel', 'e-oct-none']);
+    expect(await q('month=2026-10&payees=p-hw&categories=c-fuel')).toEqual(['e-oct-fuel']);
+    expect(await q('month=2026-10&q=bolts')).toEqual(['e-oct-none']);
+    expect(await q('month=2026-10&account=a-sav')).toEqual([]);
+    expect(await q('month=2026-10&group=g-usual')).toEqual(['e-oct-fuel', 'e-oct-groc']);
+    expect(await q('month=2026-10&uncategorized=1')).toEqual(['e-oct-none']);
+    expect(await q('month=2026-11&categories=c-fuel&payees=p-grocer')).toEqual(['t-10', 't-11']);
+    expect(await q('month=2026-11&uncategorized=1')).not.toContain('e-oct-none');
+  });
+
+  test('cursor paging within a month: no repeats, no gaps, no other month', async () => {
+    const { token } = await newToken();
+    for (let i = 1; i <= 5; i += 1) client.state.transactions.push(edge(`e-oct-${i}`, `2026-10-${String(i + 10)}`));
+    client.state.transactions.push(edge('e-sep', '2026-09-30'), edge('e-nov', '2026-11-01'));
+    const seen = [];
+    let url = '/transactions?month=2026-10&limit=2';
+    for (let guard = 0; guard < 5; guard += 1) {
+      const page = await json(await run(url, token), 'transactionsResponse');
+      seen.push(...ids(page));
+      if (!page.nextCursor) break;
+      url = `/transactions?month=2026-10&limit=2&cursor=${page.nextCursor}`;
+    }
+    expect(seen).toEqual(['e-oct-5', 'e-oct-4', 'e-oct-3', 'e-oct-2', 'e-oct-1']);
+    // A cursor from another list is just a position: the month filter still applies.
+    const nov = await json(await run('/transactions?month=2026-11&limit=2', token));
+    const cross = await json(await run(`/transactions?month=2026-10&limit=100&cursor=${nov.nextCursor}`, token));
+    expect(ids(cross)).toEqual(['e-oct-5', 'e-oct-4', 'e-oct-3', 'e-oct-2', 'e-oct-1']);
+  });
+
+  test('uncategorized + month; uncategorizedCount ignores the month', async () => {
+    const { token } = await newToken();
+    client.state.transactions.push(edge('e-oct-none', '2026-10-17', { category: null }));
+    const plain = await json(await run('/transactions', token));
+    const oct = await json(await run('/transactions?month=2026-10&uncategorized=1', token));
+    expect(ids(oct)).toEqual(['e-oct-none']);
+    const octOnly = await json(await run('/transactions?month=2026-10', token));
+    expect(octOnly.uncategorizedCount).toBe(plain.uncategorizedCount);
+    expect(oct.uncategorizedCount).toBe(plain.uncategorizedCount);
+  });
+
+  test('current month is allowed, window edges too, and it has its own cache entry', async () => {
+    const { token } = await newToken();
+    expect((await run('/transactions?month=2026-11', token)).status).toBe(200);
+    expect((await run('/transactions?month=2021-11', token)).status).toBe(200);
+    await withServer(async (base) => {
+      const a = ids(await json(await get(base, token, '/transactions?limit=100')));
+      const b = ids(await json(await get(base, token, '/transactions?limit=100&month=2026-10')));
+      const c = ids(await json(await get(base, token, '/transactions?limit=100')));
+      expect(b).toEqual([]);
+      expect(c).toEqual(a);
+    });
+  });
+
+  test('rejects anything but one YYYY-MM inside the window and not in the future', async () => {
+    const { token } = await newToken();
+    for (const value of ['2026-13', '2026-00', '2026-1', '26-11', '2026-11-01', '2026-11-', '2026/11', 'nov', '2026-11%20', '2026-12', '2027-01', '2999-01', '2021-10', '1900-01']) {
+      expect([value, (await run(`/transactions?month=${value}`, token)).status]).toEqual([value, 400]);
+    }
+    expect((await run('/transactions?month=', token)).status).toBe(400);
+    expect((await run('/transactions?month=2026-10&month=2026-11', token)).status).toBe(400);
+    expect((await run('/transactions?month[]=2026-10', token)).status).toBe(400);
+  });
+});
+
 describe('GET /transactions/suggest', () => {
   const suggest = (url, token) => withServer(async (base) => get(base, token, url));
 

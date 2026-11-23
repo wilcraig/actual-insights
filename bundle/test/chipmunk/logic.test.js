@@ -66,6 +66,15 @@ describe('transaction filter', () => {
     expect(L.toQuery({ ...f, group: { id: 'g' } })).toBe('group=g');
     expect(L.toQuery({ ...f, categories: [{ id: 'c1' }, { id: 'c2' }] })).toBe('categories=c1%2Cc2');
   });
+  test('month filter: query, labelled chip, removable, kept by suggestions', () => {
+    const f = { ...L.emptyFilter(), month: '2026-11', categories: [{ id: 'c1', name: 'Food' }] };
+    expect(L.toQuery(f)).toBe('categories=c1&month=2026-11');
+    expect(L.monthLabel('2026-11')).toBe('Nov 2026');
+    const cs = L.chips(f);
+    expect(cs.map((c) => [c.kind, c.label])).toEqual([['month', 'Nov 2026'], ['category', 'Food']]);
+    expect(L.removeChip(f, cs[0]).month).toBeNull();
+    expect(L.applySuggestion(f, { kind: 'merchant', id: 'p', name: 'Shop' }).month).toBe('2026-11');
+  });
   test('suggestions: choose replaces, add extends, category clears uncategorized', () => {
     let f = { ...L.emptyFilter(), text: 'x', uncategorized: true };
     f = L.applySuggestion(f, { kind: 'category', id: 'c1', name: 'Food' });
@@ -83,7 +92,7 @@ describe('transaction filter', () => {
     expect(f.payees).toHaveLength(20);
   });
   test('chips and removal', () => {
-    const f = { text: 'tea', uncategorized: true, group: null, payees: [{ id: 'p', name: 'Shop' }], categories: [{ id: 'c', name: 'Food' }] };
+    const f = { text: 'tea', uncategorized: true, group: null, month: null, payees: [{ id: 'p', name: 'Shop' }], categories: [{ id: 'c', name: 'Food' }] };
     const cs = L.chips(f);
     expect(cs.map((c) => c.kind)).toEqual(['text', 'uncategorized', 'category', 'payee']);
     let g = f;
