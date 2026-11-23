@@ -2,7 +2,7 @@ vi.mock('../../src/chipmunk/chipmunk-api', async (orig) => ({
   ...(await orig()),
   getMode: vi.fn(), setMode: vi.fn(), getReportList: vi.fn(), getReports: vi.fn(), getAccounts: vi.fn(), getTransactions: vi.fn(),
   suggest: vi.fn(), getBudget: vi.fn(), getSeriesList: vi.fn(), saveSeries: vi.fn(), stopSeries: vi.fn(),
-  patchTransactions: vi.fn(), setBudgeted: vi.fn(), moveBudget: vi.fn(),
+  patchTransactions: vi.fn(), setBudgeted: vi.fn(), moveBudget: vi.fn(), getCategoryHistory: vi.fn(), resetRollover: vi.fn(),
 }));
 import * as api from '../../src/chipmunk/chipmunk-api';
 import TransactionsTab from '../../src/chipmunk/TransactionsTab.svelte';
@@ -20,6 +20,7 @@ async function mount(Comp, props = {}) {
 const click = async (el) => { el.click(); await flush(); };
 const byText = (root, text, sel = 'button') => [...root.querySelectorAll(sel)].find((b) => b.textContent.trim().includes(text));
 const typeInto = async (el, value) => { el.value = value; el.dispatchEvent(new Event('input', { bubbles: true })); await flush(); };
+const keydownEsc = async (el) => { el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); await flush(); };
 const keydown = async (el, init) => { el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })); await flush(); };
 const tx = (id, over = {}) => ({ id, date: '2026-11-01', amount: -1000, payee: `Payee ${id}`, category: null, color: 'blue', ...over });
 
@@ -266,5 +267,164 @@ describe('budget: inline editing, move, context menu', () => {
     byText(document, 'Expand group', '[role=menuitem]').click();
     await flush();
     expect(h.querySelectorAll('.cat')).toHaveLength(2);
+  });
+});
+
+describe('budget editor: average spend and rollover reset', () => {
+  const cur = (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`; })();
+  const prev = (() => { const n = new Date(); n.setMonth(n.getMonth() - 1); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`; })();
+  // c1 rolls over and carries $500.00 in (balance 750 = budgeted 450 + spent -200 + 500); c2 does not roll over.
+  const budgetWith = (c1 = {}) => ({ totals: { toBudget: 0, budgeted: 0, spent: 0, balance: 0 }, groups: [{ id: 'g1', name: 'Usual', color: 'blue', budgeted: 50000, spent: 0, balance: 50000, categories: [
+    { id: 'c1', name: 'Groceries', budgeted: 45000, spent: -20000, balance: 75000, carryover: true, color: 'blue', ...c1 },
+    { id: 'c2', name: 'Fuel', budgeted: 5000, spent: 0, balance: 5000, carryover: false, color: 'blue' },
+  ] }] });
+  const hist = (...spent) => ({ categoryId: 'c1', months: spent.map((s, i) => ({ month: `2026-0${i + 1}`, budgeted: 0, spent: s })) });
+  async function open(id = 'c1', month = cur) {
+    document.body.innerHTML = '<div id="host"></div>';
+    app = new BudgetTab({ target: host(), props: {} });
+    await flush();
+    if (month !== cur) { await click(host().querySelector('.prev')); }
+    await click(host().querySelector('.head'));
+    await click(host().querySelector(`[data-category-id=${id}] .amt-btn`));
+    return host();
+  }
+  const sect = (h) => h.querySelector('.avg');
+  const field = (h) => h.querySelector('.amt-input');
+
+  beforeEach(() => {
+    api.getBudget.mockImplementation(async () => budgetWith());
+    api.getCategoryHistory.mockResolvedValue(hist(-10000, -20000, -30000));
+  });
+
+  test('asks for 6 months once per edit; shows loading, then the 3-month average and a Use button', async () => {
+    let release;
+    api.getCategoryHistory.mockReturnValue(new Promise((r) => { release = r; }));
+    const h = await open();
+    expect(api.getCategoryHistory).toHaveBeenCalledWith('c1', 6);
+    expect(sect(h).textContent).toContain('Loading');
+    release(hist(-10000, -20000, -30000, -40000, -50000, -60000));
+    await flush();
+    expect(sect(h).textContent).toContain('Avg of last 3 months: $500.00'); // newest three: 400, 500, 600
+    expect(byText(sect(h), 'Use $500.00')).toBeTruthy();
+  });
+  test('the 3 | 6 toggle recomputes and is remembered for next time', async () => {
+    api.getCategoryHistory.mockResolvedValue(hist(-10000, -20000, -30000, -40000, -50000, -60000));
+    const h = await open();
+    expect(sect(h).querySelector('[aria-pressed=true]').textContent).toBe('3');
+    await click(byText(sect(h), '6', '.seg-btn'));
+    expect(sect(h).textContent).toContain('Avg of last 6 months: $350.00');
+    expect(localStorage.getItem('insights:chipmunk:avgMonths')).toBe('6');
+    await keydownEsc(field(h));
+    const again = await open();
+    expect(sect(again).textContent).toContain('Avg of last 6 months: $350.00');
+  });
+  test('fewer months than asked, and none', async () => {
+    api.getCategoryHistory.mockResolvedValue(hist(-10000, -20000));
+    let h = await open();
+    expect(sect(h).textContent).toContain('Avg of 2 months: $150.00');
+    api.getCategoryHistory.mockResolvedValue(hist());
+    app.$destroy();
+    h = await open();
+    expect(sect(h).textContent).toContain('Not enough history yet');
+    expect(sect(h).querySelector('.use-avg')).toBeNull();
+  });
+  test('a failure hides the section silently (the editor still works)', async () => {
+    api.getCategoryHistory.mockRejectedValue(new Error('403'));
+    api.setBudgeted.mockResolvedValue({});
+    const h = await open('c2');
+    expect(sect(h)).toBeNull();
+    expect(h.querySelector('.err')).toBeNull();
+    await typeInto(field(h), '60');
+    field(h).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await flush();
+    expect(api.setBudgeted).toHaveBeenCalledWith(cur, 'c2', 6000);
+  });
+  test('Use fills the amount field without saving', async () => {
+    const h = await open();
+    await click(sect(h).querySelector('.use-avg'));
+    expect(field(h).value).toBe('200.00');
+    expect(api.setBudgeted).not.toHaveBeenCalled();
+  });
+  test('a spent amount that is a refund counts by size', async () => {
+    api.getCategoryHistory.mockResolvedValue(hist(-10000, 5000));
+    const h = await open();
+    expect(sect(h).textContent).toContain('Avg of 2 months: $75.00');
+  });
+
+  describe('reset rollover', () => {
+    const resetBtn = (h) => byText(h, 'Reset rollover…', '.reset-btn');
+    test('offered in the editor of a rollover category in the current month; the confirmation names what carried in', async () => {
+      const h = await open();
+      await click(resetBtn(h));
+      const d = h.querySelector('[role=alertdialog]');
+      expect(d.textContent).toContain('Start this rollover from $0? The $500.00 carried in from last month will stop carrying over. Earlier months are not changed.');
+      expect(api.resetRollover).not.toHaveBeenCalled();
+    });
+    test('Cancel changes nothing', async () => {
+      const h = await open();
+      await click(resetBtn(h));
+      await click(byText(h.querySelector('[role=alertdialog]'), 'Cancel'));
+      expect(h.querySelector('[role=alertdialog]')).toBeNull();
+      expect(api.resetRollover).not.toHaveBeenCalled();
+    });
+    test('Apply posts once for the current month, reloads the budget and shows "Rollover reset"', async () => {
+      api.resetRollover.mockResolvedValue({ ok: true, month: cur, carriedOver: 50000 });
+      const h = await open();
+      await click(resetBtn(h));
+      api.getBudget.mockClear();
+      await click(byText(h.querySelector('[role=alertdialog]'), 'Reset rollover', 'button'));
+      expect(api.resetRollover).toHaveBeenCalledTimes(1);
+      expect(api.resetRollover).toHaveBeenCalledWith(cur, 'c1');
+      expect(api.getBudget).toHaveBeenCalled();
+      expect(h.querySelector('.banner').textContent).toBe('Rollover reset');
+      expect(h.querySelector('[role=alertdialog]')).toBeNull();
+    });
+    test('a failed reset says so and keeps the dialog', async () => {
+      api.resetRollover.mockRejectedValue(new Error('bad_request'));
+      const h = await open();
+      await click(resetBtn(h));
+      await click(byText(h.querySelector('[role=alertdialog]'), 'Reset rollover', 'button'));
+      expect(h.querySelector('[role=alertdialog] .err').textContent).toBe('bad_request');
+      expect(h.querySelector('.banner')).toBeNull();
+    });
+    test('without a positive carried-in amount the sentence is omitted', async () => {
+      api.getBudget.mockImplementation(async () => budgetWith({ balance: 25000 })); // 25000 - 45000 + 20000 = 0
+      const h = await open();
+      await click(resetBtn(h));
+      expect(h.querySelector('[role=alertdialog]').textContent).toContain('Start this rollover from $0? Earlier months are not changed.');
+      expect(h.querySelector('[role=alertdialog]').textContent).not.toContain('carried in');
+    });
+    test('hidden for a category that does not roll over, in a past month, and for a read-only caller', async () => {
+      let h = await open('c2');
+      expect(resetBtn(h)).toBeUndefined();
+      app.$destroy();
+      h = await open('c1', prev);
+      expect(resetBtn(h)).toBeUndefined();
+      app.$destroy();
+      document.body.innerHTML = '<div id="host"></div>';
+      app = new BudgetTab({ target: host(), props: { canWrite: false } });
+      await flush();
+      await click(host().querySelector('.head'));
+      await click(host().querySelector('[data-category-id=c1] .amt-btn'));
+      expect(resetBtn(host())).toBeUndefined();
+    });
+    test('right-click menu has Reset rollover… only when it applies', async () => {
+      document.body.innerHTML = '<div id="host"></div>';
+      app = new BudgetTab({ target: host(), props: {} });
+      await flush();
+      await click(host().querySelector('.head'));
+      const rightClick = async (id) => {
+        host().querySelector(`[data-category-id=${id}]`).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 20 }));
+        await flush();
+        return [...document.querySelectorAll('[role=menuitem]')].map((b) => b.textContent);
+      };
+      expect(await rightClick('c1')).toContain('Reset rollover…');
+      byText(document, 'Reset rollover…', '[role=menuitem]').click();
+      await flush();
+      expect(host().querySelector('[role=alertdialog]').textContent).toContain('$500.00 carried in');
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await flush();
+      expect(await rightClick('c2')).not.toContain('Reset rollover…');
+    });
   });
 });

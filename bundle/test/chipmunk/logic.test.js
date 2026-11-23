@@ -172,3 +172,68 @@ describe('resizable columns', () => {
     expect(() => L.saveColumns(blocked, {})).not.toThrow();
   });
 });
+
+describe('average spend and rollover reset math', () => {
+  const m = (...spent) => spent.map((x, i) => ({ month: `2026-0${i + 1}`, budgeted: 0, spent: x }));
+  test('nothing to average', () => {
+    expect(L.averageSpend([], 3)).toBeNull();
+    expect(L.averageSpend(null, 3)).toBeNull();
+    expect(L.averageSpend(m(-100), 0)).toBeNull();
+  });
+  test('1, 2, 3 and 6 months: the newest N, fewer when the budget is younger', () => {
+    expect(L.averageSpend(m(-1000), 3)).toEqual({ cents: 1000, months: 1, requested: 3 });
+    expect(L.averageSpend(m(-1000, -2000), 3)).toEqual({ cents: 1500, months: 2, requested: 3 });
+    expect(L.averageSpend(m(-9999, -1000, -2000, -3000), 3)).toEqual({ cents: 2000, months: 3, requested: 3 }); // the oldest is left out
+    expect(L.averageSpend(m(-1, -2, -3, -4, -5, -6), 6)).toEqual({ cents: 4, months: 6, requested: 6 }); // 3.5 rounds half up
+    expect(L.averageSpend(m(-100, -100, -100, -100, -100, -600), 3).cents).toBe(267); // (100+100+600)/3 = 266.67
+  });
+  test('half-up rounding and abs of spent (refunds count as spend of that size, like the phone)', () => {
+    expect(L.averageSpend(m(-1, -2), 3).cents).toBe(2); // 1.5 -> 2
+    expect(L.averageSpend(m(-1, -1, -2), 3).cents).toBe(1); // 1.33 -> 1
+    expect(L.averageSpend(m(-1, -2, -2), 3).cents).toBe(2); // 1.67 -> 2
+    expect(L.averageSpend(m(-1000, 500), 3).cents).toBe(750);
+    expect(L.averageSpend(m(0, 0), 3).cents).toBe(0);
+    expect(L.averageSpend([{ month: '2026-01' }, { month: '2026-02', spent: -300 }], 3).cents).toBe(150);
+  });
+  test('labels', () => {
+    expect(L.spendAverageLabel({ cents: 1, months: 3, requested: 3 }, '$0.01')).toBe('Avg of last 3 months: $0.01');
+    expect(L.spendAverageLabel({ cents: 1, months: 2, requested: 3 }, '$0.01')).toBe('Avg of 2 months: $0.01');
+    expect(L.spendAverageLabel({ cents: 1, months: 1, requested: 6 }, '$0.01')).toBe('Avg of 1 month: $0.01');
+    expect(L.NO_HISTORY).toBe('Not enough history yet');
+  });
+  test('the toggle is remembered per browser; anything else is 3', () => {
+    const st = memory();
+    expect(L.loadSpendMonths(st)).toBe(3);
+    L.saveSpendMonths(st, 6);
+    expect(L.loadSpendMonths(st)).toBe(6);
+    L.saveSpendMonths(st, 4);
+    expect(L.loadSpendMonths(st)).toBe(3);
+    st.setItem('insights:chipmunk:avgMonths', 'x');
+    expect(L.loadSpendMonths(st)).toBe(3);
+    expect(L.loadSpendMonths(throwing)).toBe(3);
+    expect(() => L.saveSpendMonths(throwing, 6)).not.toThrow();
+    expect([L.normalizeSpendMonths(3), L.normalizeSpendMonths('6'), L.normalizeSpendMonths(12), L.normalizeSpendMonths(undefined)]).toEqual([3, 6, 3, 3]);
+  });
+  test('what a rollover carries in: balance - budgeted - spent, only when positive', () => {
+    expect(L.rolloverCarriedIn({ balance: 75000, budgeted: 45000, spent: -20000 })).toBe(50000);
+    expect(L.rolloverCarriedIn({ balance: 25000, budgeted: 45000, spent: -20000 })).toBeNull(); // zero
+    expect(L.rolloverCarriedIn({ balance: 1000, budgeted: 45000, spent: -20000 })).toBeNull(); // deficit
+    expect(L.rolloverCarriedIn({ balance: 1, budgeted: 0 })).toBeNull();
+    expect(L.rolloverCarriedIn(null)).toBeNull();
+  });
+  test('the reset is offered only for a rollover, in the current month, when writing is allowed', () => {
+    const ok = { carryover: true, month: '2026-11', currentMonth: '2026-11', canWrite: true };
+    expect(L.offersRolloverReset(ok)).toBe(true);
+    expect(L.offersRolloverReset({ ...ok, carryover: false })).toBe(false);
+    expect(L.offersRolloverReset({ ...ok, carryover: undefined })).toBe(false);
+    expect(L.offersRolloverReset({ ...ok, month: '2026-10' })).toBe(false);
+    expect(L.offersRolloverReset({ ...ok, canWrite: false })).toBe(false);
+    expect(L.offersRolloverReset({ ...ok, month: 'bad', currentMonth: 'bad' })).toBe(false);
+  });
+  test('confirmation text; the carried-in sentence is omitted when it cannot be worked out', () => {
+    expect(L.rolloverConfirmMessage(5000, '$50.00')).toBe('Start this rollover from $0? The $50.00 carried in from last month will stop carrying over. Earlier months are not changed.');
+    expect(L.rolloverConfirmMessage(null, null)).toBe('Start this rollover from $0? Earlier months are not changed.');
+    expect(L.rolloverConfirmMessage(5000, null)).toBe('Start this rollover from $0? Earlier months are not changed.');
+    expect(L.ROLLOVER_BANNER).toBe('Rollover reset');
+  });
+});

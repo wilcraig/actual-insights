@@ -75,3 +75,9 @@ export async function syncAccounts() {
     clearTimeout(timer);
   }
 }
+
+// Budget amount editor extras. History: the most recent completed months of a
+// category, oldest first ({ categoryId, months:[{month,budgeted,spent}] }).
+export const getCategoryHistory = (id, months = 6) => call(`/api/chipmunk/budget/category/${encodeURIComponent(id)}/history?months=${months}`);
+// Starts a rollover category afresh as of the current month ({ ok, month, carriedOver }).
+export const resetRollover = (month, id) => call(`/api/chipmunk/budget/${month}/categories/${encodeURIComponent(id)}/rollover-reset`, json('POST', {}));

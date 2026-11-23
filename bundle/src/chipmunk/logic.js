@@ -262,3 +262,73 @@ export function resetColumns(storage) {
     // Nothing to forget.
   }
 }
+
+// ---- Average spend and rollover reset (budget amount editor) ----
+// Same math and wording as the phone apps (spec "Category pacing, budget averages,
+// rollover reset and split remainder"; NativeBudgetInsights.swift / BudgetInsights.kt).
+export const SPEND_CHOICES = [3, 6];
+export const SPEND_DEFAULT_MONTHS = 3;
+export const HISTORY_FETCH_MONTHS = 6;
+export const NO_HISTORY = 'Not enough history yet';
+export const ROLLOVER_BANNER = 'Rollover reset';
+const AVG_KEY = 'insights:chipmunk:avgMonths';
+
+/** A stored toggle value, or the default for anything else. */
+export const normalizeSpendMonths = (n) => (SPEND_CHOICES.includes(Number(n)) ? Number(n) : SPEND_DEFAULT_MONTHS);
+
+export function loadSpendMonths(storage) {
+  try {
+    return normalizeSpendMonths(storage.getItem(AVG_KEY));
+  } catch {
+    return SPEND_DEFAULT_MONTHS;
+  }
+}
+
+export function saveSpendMonths(storage, months) {
+  try {
+    storage.setItem(AVG_KEY, String(normalizeSpendMonths(months)));
+  } catch {
+    // Blocked storage: the choice is just not remembered.
+  }
+}
+
+/**
+ * The half-up integer-cent average of abs(spent) over the newest `window`
+ * entries of `history` (oldest first), or over all of them when fewer exist.
+ * null when there is nothing to average.
+ * @returns {{ cents: number, months: number, requested: number } | null}
+ */
+export function averageSpend(history, window) {
+  if (!Array.isArray(history) || !(window > 0)) return null;
+  const used = history.slice(-window);
+  if (used.length === 0) return null;
+  const sum = used.reduce((s, m) => s + Math.abs(Number(m?.spent) || 0), 0);
+  const n = used.length;
+  return { cents: Math.floor((sum * 2 + n) / (2 * n)), months: n, requested: window };
+}
+
+/** "Avg of last 3 months: $X", or "Avg of 2 months: $X" ("1 month") when the budget is younger. */
+export function spendAverageLabel(avg, amount) {
+  if (avg.months === avg.requested) return `Avg of last ${avg.months} months: ${amount}`;
+  return `Avg of ${avg.months} ${avg.months === 1 ? 'month' : 'months'}: ${amount}`;
+}
+
+/** What a rollover category carries in from last month: balance - budgeted - spent, when that is positive. */
+export function rolloverCarriedIn(cat) {
+  const { balance, budgeted, spent } = cat ?? {};
+  if (![balance, budgeted, spent].every(Number.isFinite)) return null;
+  const x = balance - budgeted - spent;
+  return x > 0 ? x : null;
+}
+
+/** The reset is offered for a rollover category, in the current month, when writing is allowed. */
+export const offersRolloverReset = ({ carryover, month, currentMonth, canWrite }) =>
+  carryover === true && canWrite === true && /^\d{4}-\d{2}$/.test(month) && month === currentMonth;
+
+/** The confirmation text; the "carried in" sentence is left out when the amount cannot be worked out. */
+export function rolloverConfirmMessage(carriedIn, amount) {
+  if (carriedIn != null && amount) {
+    return `Start this rollover from $0? The ${amount} carried in from last month will stop carrying over. Earlier months are not changed.`;
+  }
+  return 'Start this rollover from $0? Earlier months are not changed.';
+}

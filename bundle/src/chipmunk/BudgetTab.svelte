@@ -1,13 +1,15 @@
 <script>
   import { onMount } from 'svelte';
-  import { getBudget, getSeriesList, setBudgeted, moveBudget } from './chipmunk-api';
+  import { getBudget, getSeriesList, setBudgeted, moveBudget, getCategoryHistory, resetRollover } from './chipmunk-api';
   import ContextMenu from './ContextMenu.svelte';
-  import { colorFor, formatMoney, shiftMonth, seriesSummary, balanceTone, parseAmountToCents } from './logic';
+  import { colorFor, formatMoney, shiftMonth, seriesSummary, balanceTone, parseAmountToCents, HISTORY_FETCH_MONTHS, NO_HISTORY, ROLLOVER_BANNER, loadSpendMonths, saveSpendMonths, averageSpend, spendAverageLabel, rolloverCarriedIn, offersRolloverReset, rolloverConfirmMessage } from './logic';
   import SeriesForm from './SeriesForm.svelte';
 
   // The phone's Budget screen: month arrows, groups collapsed at first with
   // their totals, categories inside, a repeat marker on categories that have a
   // series, and the series editor (see SeriesForm).
+  // `canWrite` false (a read-only caller) hides the rollover reset.
+  let { canWrite = true } = $props();
   const now = new Date();
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   let month = $state(currentMonth);
@@ -39,6 +41,7 @@
   // Click the amount; Enter or Tab saves (Tab goes on to the next category),
   // Esc cancels. "Repeat" hands the typed amount to the series editor.
   let amountEdit = $state(null); // { id, text }
+  let amountInput = $state(null);
   let amountBusy = $state(false);
   let amountError = $state('');
   let seriesAmount = $state(null); // cents typed when Repeat was chosen
@@ -46,6 +49,72 @@
   let moveFor = $state(null); // { from, to, text }
   let moveBusy = $state(false);
   let moveError = $state('');
+  // Average spend (history of the category being edited) and the rollover reset.
+  let avgMonths = $state(3);
+  let hist = $state(null); // { id, status: 'loading' | 'ready' } ; a failure leaves it null (section hidden)
+  let histTicket = 0;
+  let resetFor = $state(null); // category id whose reset confirmation is open
+  let resetBusy = $state(false);
+  let resetError = $state('');
+  let banner = $state('');
+
+  function store() {
+    try {
+      return window.localStorage;
+    } catch {
+      return null;
+    }
+  }
+
+  async function loadHistory(id) {
+    const mine = ++histTicket;
+    hist = { id, status: 'loading', months: [] };
+    try {
+      const r = await getCategoryHistory(id, HISTORY_FETCH_MONTHS);
+      if (mine !== histTicket) return;
+      hist = { id, status: 'ready', months: Array.isArray(r?.months) ? r.months : [] };
+    } catch {
+      if (mine === histTicket) hist = null; // hide the section silently
+    }
+  }
+
+  const histFor = (id) => (hist && hist.id === id ? hist : null);
+  const avgFor = (id) => {
+    const h = histFor(id);
+    return h && h.status === 'ready' ? averageSpend(h.months, avgMonths) : null;
+  };
+  function pickMonths(n) {
+    avgMonths = n;
+    const st = store();
+    if (st) saveSpendMonths(st, n);
+  }
+  function useAverage(cents) {
+    if (!amountEdit) return;
+    amountEdit.text = (cents / 100).toFixed(2);
+    amountError = '';
+    amountInput?.focus();
+    amountInput?.select();
+  }
+  const canReset = (cat) => offersRolloverReset({ carryover: cat.carryover, month, currentMonth, canWrite });
+  function askReset(cat) {
+    resetError = '';
+    banner = '';
+    resetFor = cat.id;
+  }
+  async function doReset(cat) {
+    resetBusy = true;
+    resetError = '';
+    try {
+      await resetRollover(month, cat.id);
+      resetFor = null;
+      await refresh();
+      banner = ROLLOVER_BANNER;
+    } catch (err) {
+      resetError = err.message || 'Could not reset.';
+    } finally {
+      resetBusy = false;
+    }
+  }
 
   const flat = $derived(budget ? budget.groups.filter((g) => open.has(g.id)).flatMap((g) => g.categories) : []);
   const allCats = $derived(budget ? budget.groups.flatMap((g) => g.categories.map((c) => ({ ...c, group: g.name }))) : []);
@@ -53,6 +122,9 @@
   function beginEdit(cat) {
     amountError = '';
     amountEdit = { id: cat.id, text: (cat.budgeted / 100).toFixed(2) };
+    const st = store();
+    avgMonths = st ? loadSpendMonths(st) : 3;
+    loadHistory(cat.id);
   }
 
   async function refresh() {
@@ -158,6 +230,7 @@
       items: [
         { label: 'Edit budgeted amount', run: () => beginEdit(cat) },
         { label: 'Move money from here\u2026', run: () => beginMove(cat) },
+        ...(canReset(cat) ? [{ label: 'Reset rollover\u2026', run: () => askReset(cat) }] : []),
         { label: series ? 'Budget series\u2026' : 'Repeat\u2026', run: () => { seriesAmount = null; editing = cat.id; } },
         { separator: true },
         { label: 'Copy category name', run: () => navigator.clipboard?.writeText(cat.name) },
@@ -211,6 +284,7 @@
   {:else if status === 'error'}
     <p class="err" role="alert">{errorText}</p>
   {:else}
+    {#if banner}<p class="banner" role="status">{banner}</p>{/if}
     <p class="totals">To budget <strong>{formatMoney(budget.totals.toBudget)}</strong> &middot; Budgeted {formatMoney(budget.totals.budgeted)} &middot; Spent {formatMoney(budget.totals.spent)}</p>
     {#each budget.groups as group, gi (group.id)}
       <section class="group" data-group-id={group.id}>
@@ -227,7 +301,7 @@
               <span class="name">{cat.name}{#if series}<small class="repeat"> &#8635; {seriesSummary(series)}</small>{/if}</span>
               {#if amountEdit?.id === cat.id}
                 <span class="edit">
-                  <input class="amt-input" type="text" inputmode="decimal" aria-label="Budgeted amount for {cat.name}" bind:value={amountEdit.text} disabled={amountBusy} onkeydown={(e) => onAmountKey(e, cat)} use:focusSelect />
+                  <input class="amt-input" type="text" inputmode="decimal" aria-label="Budgeted amount for {cat.name}" bind:this={amountInput} bind:value={amountEdit.text} disabled={amountBusy} onkeydown={(e) => onAmountKey(e, cat)} use:focusSelect />
                   <button type="button" class="repeat-btn" disabled={amountBusy} onmousedown={(e) => e.preventDefault()} onclick={() => repeatFromEdit(cat)}>Repeat&hellip;</button>
                 </span>
               {:else}
@@ -237,6 +311,43 @@
               <button type="button" class="repeat-btn" onclick={() => { seriesAmount = null; editing = editing === cat.id ? null : cat.id; }}>{series ? 'Series' : 'Repeat'}</button>
             </div>
             {#if amountEdit?.id === cat.id && amountError}<p class="err inline" role="alert">{amountError}</p>{/if}
+            {#if amountEdit?.id === cat.id && (histFor(cat.id) || canReset(cat))}
+              {@const h = histFor(cat.id)}
+              {@const avg = avgFor(cat.id)}
+              <div class="extras">
+                {#if h}
+                  <div class="avg" aria-label="Average spend">
+                    <strong>Average spend</strong>
+                    <span class="seg" role="group" aria-label="Months to average">
+                      {#each [3, 6] as n (n)}<button type="button" class="seg-btn" class:on={avgMonths === n} aria-pressed={avgMonths === n} onmousedown={(e) => e.preventDefault()} onclick={() => pickMonths(n)}>{n}</button>{/each}
+                      <span class="seg-unit">months</span>
+                    </span>
+                    {#if h.status === 'loading'}
+                      <span class="muted avg-text">Loading&hellip;</span>
+                    {:else if avg}
+                      <span class="avg-text">{spendAverageLabel(avg, formatMoney(avg.cents))}</span>
+                      <button type="button" class="repeat-btn use-avg" onmousedown={(e) => e.preventDefault()} onclick={() => useAverage(avg.cents)}>Use {formatMoney(avg.cents)}</button>
+                    {:else}
+                      <span class="muted avg-text">{NO_HISTORY}</span>
+                    {/if}
+                  </div>
+                {/if}
+                {#if canReset(cat)}
+                  <button type="button" class="repeat-btn reset-btn" onmousedown={(e) => e.preventDefault()} onclick={() => askReset(cat)}>Reset rollover&hellip;</button>
+                {/if}
+              </div>
+            {/if}
+            {#if resetFor === cat.id && canReset(cat)}
+              <div class="reset-confirm" role="alertdialog" aria-label="Reset rollover?">
+                <strong>Reset rollover?</strong>
+                <span>{rolloverConfirmMessage(rolloverCarriedIn(cat), rolloverCarriedIn(cat) != null ? formatMoney(rolloverCarriedIn(cat)) : null)}</span>
+                <span class="confirm-actions">
+                  <button type="button" class="repeat-btn apply-reset" disabled={resetBusy} onclick={() => doReset(cat)}>{resetBusy ? 'Resetting\u2026' : 'Reset rollover'}</button>
+                  <button type="button" class="repeat-btn" disabled={resetBusy} onclick={() => (resetFor = null)}>Cancel</button>
+                </span>
+                {#if resetError}<span class="err" role="alert">{resetError}</span>{/if}
+              </div>
+            {/if}
             {#if moveFor?.from === cat.id}
               <div class="move" role="group" aria-label="Move money from {cat.name}">
                 <span>Move from {cat.name} (now {formatMoney(cat.budgeted)}) to</span>
@@ -273,6 +384,16 @@
   .name { flex: 1; min-width: 0; }
   .n { width: 78px; text-align: right; font-variant-numeric: tabular-nums; }
   .positive { color: #16a34a; } .negative { color: #dc2626; }
+  .extras { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; padding: 4px 20px 8px; font-size: 13px; }
+  .avg { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .seg { display: inline-flex; align-items: center; gap: 2px; }
+  .seg-btn { border: 1px solid color-mix(in srgb, currentColor 25%, transparent); background: transparent; color: inherit; font: inherit; padding: 1px 9px; cursor: pointer; border-radius: 6px; }
+  .seg-btn.on { background: color-mix(in srgb, var(--palette-chartQual1, #2563eb) 20%, transparent); border-color: var(--palette-chartQual1, #2563eb); }
+  .seg-unit { opacity: 0.65; margin-left: 4px; }
+  .reset-confirm { display: flex; flex-direction: column; gap: 6px; margin: 4px 20px 8px; padding: 10px 12px; border: 1px solid #dc2626; border-radius: 8px; font-size: 13px; }
+  .confirm-actions { display: flex; gap: 8px; }
+  .apply-reset { background: #dc2626; color: #fff; }
+  .banner { margin: 0; text-align: center; font-size: 13px; color: #16a34a; }
   .amt-btn { border: 0; background: transparent; color: inherit; font: inherit; cursor: text; border-radius: 4px; padding: 2px 4px; }
   .amt-btn:hover, .amt-btn:focus-visible { background: color-mix(in srgb, currentColor 10%, transparent); outline: none; }
   .edit { display: inline-flex; gap: 6px; align-items: center; }

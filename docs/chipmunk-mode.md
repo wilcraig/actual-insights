@@ -85,6 +85,15 @@ All audited as writer `web`, using the phone's own write logic (`api/src/mobile/
 - Transactions table: the selection bar offers Categorize, Mark cleared, Hide, Exclude; the same actions are in the right-click menu (which acts on the selection, or selects the
   row under the pointer). Every action first shows a plain-words confirmation (what, how many, and that there is no undo in this view for hide/exclude; the filter's **Show hidden**
   brings hidden rows back, and the menu has Show again / Include).
+- **Average spend and rollover reset** (the budget amount editor, same as the phone apps): opening the inline editor fetches
+  `GET /api/chipmunk/budget/category/:id/history?months=6`. The **Average spend** section has a **3 | 6 months** toggle (default 3, remembered in
+  `localStorage` as `insights:chipmunk:avgMonths`) and shows "Avg of last 3 months: $X" with a **Use $X** button that fills the amount field (it does not save).
+  X is the half-up integer-cent average of `abs(spent)` over the newest N history entries (`averageSpend` in `logic.js`); with fewer entries the label reads
+  "Avg of 2 months: $X" ("1 month"), with none "Not enough history yet". While loading it says Loading; if the request fails the section is hidden silently.
+  **Reset rollover...** (in the editor, and in the row's right-click menu) appears only for a category with `carryover` true, in the **current month**, for a caller that can write
+  (`canWrite`, true for the signed-in owner). It asks "Start this rollover from $0? The $X carried in from last month will stop carrying over. Earlier months are not changed."
+  with X = balance - budgeted - spent; when that is not positive the "carried in" sentence is left out. Confirm calls
+  `POST /api/chipmunk/budget/<month>/categories/<id>/rollover-reset` (body `{}`), reloads the budget and shows "Rollover reset".
 - Budget screen: click a category's budgeted amount to edit it in place. Enter saves, Tab saves and moves to the next category, Esc cancels. **Repeat...** in the editor opens the series
   editor with the typed amount. Right-click a category: Edit amount, Move money from here (pick target and amount), Repeat/Series, Copy name. Right-click a group: expand/collapse.
 - Transactions table columns (Date, Category, Amount) resize by dragging the header edge, arrow keys on the edge (Shift for bigger steps), double-click to reset; widths are remembered in `localStorage`.

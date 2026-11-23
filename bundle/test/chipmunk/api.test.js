@@ -96,3 +96,15 @@ describe('syncAccounts', () => {
     expect([e.status, e.message]).toEqual([0, 'timeout']);
   });
 });
+
+test('budget editor extras: history and rollover reset', async () => {
+  fetchApi.mockResolvedValue(ok({}));
+  await api.getCategoryHistory('c 1');
+  await api.getCategoryHistory('c1', 3);
+  await api.resetRollover('2026-11', 'c 1');
+  expect(fetchApi.mock.calls.map((c) => [c[0], c[1]?.method, c[1]?.body])).toEqual([
+    ['/api/chipmunk/budget/category/c%201/history?months=6', undefined, undefined],
+    ['/api/chipmunk/budget/category/c1/history?months=3', undefined, undefined],
+    ['/api/chipmunk/budget/2026-11/categories/c%201/rollover-reset', 'POST', '{}'],
+  ]);
+});
