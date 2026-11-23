@@ -11,3 +11,5 @@ Refreshed again on 2026-11-09 for `entitlementRequest` / `entitlementResponse` (
 examples `entitlementRequestGoogle` and `entitlementResponseNone` are variants, see `test/helpers/native-v1.js`).
 
 Refreshed again on 2026-11-11 for `accountsSyncRequest` / `accountsSyncResponse` (POST /accounts/sync).
+
+Refreshed again on 2026-11-24 for `categoryHistoryResponse` (GET /budget/category/<id>/history) and `rolloverResetRequest` / `rolloverResetResponse` (POST /budget/<month>/categories/<id>/rollover-reset).

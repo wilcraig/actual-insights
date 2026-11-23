@@ -50,6 +50,10 @@ function makeFakeActual(overrides = {}) {
     budget: {},
     spent: { 'c-groc': -9500, 'c-fuel': -2800, 'c-pay': 0 },
     carryover: { 'c-fuel': true },
+    // Optional per-month overrides for tests: months Actual "has" (getBudgetMonths),
+    // monthData[month][categoryId] = { budgeted, spent, balance, carryover }.
+    months: null,
+    monthData: {},
     income: 215000,
     toBudget: 163840,
     transactions: [
@@ -143,7 +147,7 @@ function makeFakeActual(overrides = {}) {
       const lines = monthLines(month);
       const groups = state.groups.map((g) => ({
         ...g,
-        categories: g.categories.map((c) => ({ ...c, budgeted: lines[c.id] ?? 0, spent: state.spent[c.id] ?? 0, balance: (lines[c.id] ?? 0) + (state.spent[c.id] ?? 0), carryover: Boolean(state.carryover[c.id]) })),
+        categories: g.categories.map((c) => ({ ...c, budgeted: lines[c.id] ?? 0, spent: state.spent[c.id] ?? 0, balance: (lines[c.id] ?? 0) + (state.spent[c.id] ?? 0), carryover: Boolean(state.carryoverByMonth && state.carryoverByMonth[month] && c.id in state.carryoverByMonth[month] ? state.carryoverByMonth[month][c.id] : state.carryover[c.id]), ...((state.monthData[month] || {})[c.id] || {}) })),
       }));
       const all = groups.filter((g) => !g.is_income).flatMap((g) => g.categories);
       return {
@@ -155,6 +159,12 @@ function makeFakeActual(overrides = {}) {
         totalIncome: state.income,
         categoryGroups: groups,
       };
+    }),
+    getBudgetMonths: jest.fn(async () => state.months || Array.from({ length: 96 }, (_, i) => `${2025 + Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, '0')}`)), // 2025-01 .. 2032-12, far beyond any series horizon
+    setBudgetCarryover: jest.fn(async (month, id, flag) => {
+      state.calls.push(['setBudgetCarryover', month, id, flag]);
+      state.carryoverByMonth = state.carryoverByMonth || {};
+      state.carryoverByMonth[month] = { ...(state.carryoverByMonth[month] || {}), [id]: flag };
     }),
     setBudgetAmount: jest.fn(async (month, id, amount) => { state.calls.push(['setBudgetAmount', month, id, amount]); monthLines(month)[id] = amount; }),
     batchBudgetUpdates: jest.fn(async (fn) => { state.calls.push(['batch']); await fn(); }),

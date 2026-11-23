@@ -2922,6 +2922,79 @@
           "$ref": "#/definitions/generatedAt"
         }
       }
+    },
+    "categoryHistoryResponse": {
+      "description": "Response to GET /budget/category/<id>/history?months=N (read scope; N 1..12, default 6). The most recent COMPLETED months (never the current one) in which the budget has data for this category, oldest first, fewer than N when the budget is younger. budgeted and spent follow budgetCategory (spent is negative for money out). 404 for an unknown, hidden or income category.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "categoryId",
+        "months"
+      ],
+      "properties": {
+        "schema": {
+          "const": 1
+        },
+        "categoryId": {
+          "$ref": "#/definitions/id"
+        },
+        "months": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "month",
+              "budgeted",
+              "spent"
+            ],
+            "properties": {
+              "month": {
+                "$ref": "#/definitions/month"
+              },
+              "budgeted": {
+                "$ref": "#/definitions/money"
+              },
+              "spent": {
+                "$ref": "#/definitions/money"
+              }
+            }
+          }
+        }
+      }
+    },
+    "rolloverResetRequest": {
+      "description": "POST /budget/<month>/categories/<id>/rollover-reset (write scope). Empty JSON object. <month> must be the current month. Starts this category's rollover afresh as of <month>: the previous month's balance stops carrying into <month> (the previous month's carryover flag is switched off) while <month>'s own rollover flag and every later month stay as they are, so the rollover keeps working from here on. Past months' amounts are not touched. A category that is not a rollover category, or has nothing carrying in, answers 200 with carriedOver 0 and changes nothing. 400 for a non-current month or an income/hidden category, 404 unknown category, 403 read token.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {}
+    },
+    "rolloverResetResponse": {
+      "description": "Response to POST .../rollover-reset. carriedOver is the balance that was carrying into month before the reset (0 if nothing was).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "ok",
+        "month",
+        "carriedOver"
+      ],
+      "properties": {
+        "schema": {
+          "const": 1
+        },
+        "ok": {
+          "const": true
+        },
+        "month": {
+          "$ref": "#/definitions/month"
+        },
+        "carriedOver": {
+          "$ref": "#/definitions/money"
+        }
+      }
     }
   }
 }

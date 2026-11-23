@@ -9,6 +9,7 @@ const { MONTH_PATTERN, ID_PATTERN, MAX_NOTE, MAX_MONEY, HttpError, badRequest, n
 const { MAX_LIMIT, DEFAULT_LIMIT, CURSOR_PATTERN, buildCurrency, buildAccounts, buildTransactions, buildTransactionSuggest, SUGGEST_MAX_LIMIT, SUGGEST_DEFAULT_LIMIT, buildCategories, buildBudgetMonth, buildTransactionDetail } = require('../mobile/v1/read');
 const { RANGES, buildAccountDetail, putAccountSettings } = require('../mobile/v1/accounts');
 const { buildColors, putColor, isColorKey } = require('../mobile/v1/colors');
+const { buildCategoryHistory, parseHistoryMonths, resetRollover, currentMonthOf } = require('../mobile/v1/category-budget');
 const { buildSpending } = require('../mobile/v1/spending');
 const { syncAllAccounts, resetSyncState } = require('../mobile/v1/sync-accounts');
 const { updateTransactionFields, splitTransactionLines, removeSplit, setBudgetedAmount, moveBudget, createGroup, createCategory, createAccountGroup, renameAccountGroup, deleteAccountGroup, setAccountGroup } = require('../mobile/v1/write');
@@ -208,6 +209,13 @@ router.get('/budget/:month', readLimit, read((req) => {
   return { key: `budget|${month}`, build: (client) => buildBudgetMonth(client, month) };
 }));
 
+router.get('/budget/category/:id/history', readLimit, read((req) => {
+  strictQuery(req, ['months']);
+  const id = pathId(req.params.id);
+  const months = parseHistoryMonths(req.query.months);
+  return { key: `budget-history|${id}|${months}`, build: (client) => buildCategoryHistory(client, id, months) };
+}));
+
 router.get('/reports', readLimit, read((req) => {
   strictQuery(req, ['report', 'month']);
   const reportId = req.query.report;
@@ -386,6 +394,15 @@ router.put('/budget/:month/categories/:id', writeLimit, requireWrite, parseJson,
   const { budgeted } = strictBody(req, ['budgeted']);
   if (!isCents(budgeted, 0, 1000000000000)) throw badRequest();
   return () => setBudgetedAmount({ tokenId: req.deviceToken.id, month, categoryId, budgeted });
+}));
+
+// Start a category's rollover afresh as of the current month (empty body).
+router.post('/budget/:month/categories/:id/rollover-reset', writeLimit, requireWrite, parseJson, write((req) => {
+  const month = pathMonth(req);
+  const categoryId = pathId(req.params.id);
+  strictBody(req, []);
+  if (month !== currentMonthOf(new Date())) throw badRequest();
+  return () => resetRollover({ tokenId: req.deviceToken.id, month, categoryId });
 }));
 
 // Colours: {color: <colorKey>|null}, nothing else; null returns to the default.

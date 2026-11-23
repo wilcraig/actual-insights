@@ -7,6 +7,7 @@ const { MONTH_PATTERN, isValidId, monthWithinWindow, parseTransactionsMonth } = 
 const { MAX_LIMIT, DEFAULT_LIMIT, CURSOR_PATTERN, buildAccounts, buildTransactions, buildTransactionSuggest, SUGGEST_MAX_LIMIT, SUGGEST_DEFAULT_LIMIT, buildBudgetMonth } = require('../mobile/v1/read');
 const { saveSeries, deleteSeries, buildSeriesList } = require('../mobile/v1/budget-series');
 const { HttpError, ID_PATTERN, MAX_NOTE } = require('../mobile/v1/common');
+const { buildCategoryHistory, parseHistoryMonths, resetRollover, currentMonthOf } = require('../mobile/v1/category-budget');
 const { syncAllAccounts } = require('../mobile/v1/sync-accounts');
 const { MAX_BULK, updateTransactionsBulk, setBudgetedAmount, moveBudget } = require('../mobile/v1/write');
 
@@ -192,6 +193,12 @@ data.get('/budget/:month', wrap(async (req, client) => {
   return buildBudgetMonth(client, month);
 }));
 
+data.get('/budget/category/:id/history', wrap(async (req, client) => {
+  only(req, ['months']);
+  if (!isValidId(req.params.id)) throw bad();
+  return buildCategoryHistory(client, req.params.id, parseHistoryMonths(req.query.months));
+}));
+
 data.get('/budget-series', wrap(async (req, client) => {
   only(req, []);
   return buildSeriesList(client);
@@ -277,6 +284,15 @@ data.post('/budget/:month/move', sendWrite(async (req) => {
   const { from, to, amount } = plainBody(req, ['from', 'to', 'amount']);
   if (!isValidId(from) || !isValidId(to) || from === to || !isCents(amount, 1, 1000000000000)) throw badReq();
   return moveBudget({ tokenId: 'web', month, from, to, amount });
+}));
+
+// Start a category's rollover afresh as of the current month. Body must be {}.
+data.post('/budget/:month/categories/:id/rollover-reset', sendWrite(async (req) => {
+  const { month, id } = req.params;
+  if (!MONTH_PATTERN.test(month) || !monthWithinWindow(month) || !isValidId(id)) throw badReq();
+  plainBody(req, []);
+  if (month !== currentMonthOf(new Date())) throw badReq();
+  return resetRollover({ tokenId: 'web', month, categoryId: id });
 }));
 
 // Bank sync for every linked account (slow: up to ~110 s). Body must be {}.

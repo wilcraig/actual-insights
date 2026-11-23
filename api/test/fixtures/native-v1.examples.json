@@ -960,5 +960,33 @@
     "schema": 1,
     "ok": true,
     "syncedAt": "2026-11-11T16:00:00.000Z"
+  },
+  "categoryHistoryResponse": {
+    "schema": 1,
+    "categoryId": "c-groc",
+    "months": [
+      {
+        "month": "2026-08",
+        "budgeted": 50000,
+        "spent": -47210
+      },
+      {
+        "month": "2026-09",
+        "budgeted": 50000,
+        "spent": -53100
+      },
+      {
+        "month": "2026-10",
+        "budgeted": 50000,
+        "spent": -48875
+      }
+    ]
+  },
+  "rolloverResetRequest": {},
+  "rolloverResetResponse": {
+    "schema": 1,
+    "ok": true,
+    "month": "2026-11",
+    "carriedOver": 12500
   }
 }
